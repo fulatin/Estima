@@ -12,6 +12,7 @@ pub struct PluginInfo {
     pub uri: String,
     pub name: String,
     pub plugin_type: String,
+    pub bypass: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -49,6 +50,7 @@ fn list_plugins(filter: Option<String>, state: State<AudioState>) -> Result<Vec<
                 uri: p.uri.clone(),
                 name: p.name.clone(),
                 plugin_type: p.plugin_type.clone(),
+                bypass: false,
             })
             .collect()
     } else {
@@ -59,6 +61,7 @@ fn list_plugins(filter: Option<String>, state: State<AudioState>) -> Result<Vec<
                 uri: p.uri.clone(),
                 name: p.name.clone(),
                 plugin_type: p.plugin_type.clone(),
+                bypass: false,
             })
             .collect()
     };
@@ -83,6 +86,7 @@ fn load_plugin(uri: String, state: State<AudioState>) -> Result<PluginInfo, Stri
         uri,
         name: plugin.info.name.clone(),
         plugin_type: plugin.info.plugin_type.clone(),
+        bypass: plugin.bypass,
     })
 }
 
@@ -96,6 +100,18 @@ fn remove_plugin(id: String, state: State<AudioState>) -> Result<(), String> {
         *last_id = None;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn toggle_plugin_bypass(id: String, state: State<AudioState>) -> Result<bool, String> {
+    let mut chain = state.chain.lock().map_err(|e| e.to_string())?;
+    chain.toggle_plugin_bypass(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn move_plugin(id: String, direction: i32, state: State<AudioState>) -> Result<(), String> {
+    let mut chain = state.chain.lock().map_err(|e| e.to_string())?;
+    chain.move_plugin(&id, direction).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -160,6 +176,7 @@ fn get_chain_status(state: State<AudioState>) -> Result<ChainStatus, String> {
             uri: p.info.uri.clone(),
             name: p.info.name.clone(),
             plugin_type: p.info.plugin_type.clone(),
+            bypass: p.bypass,
         })
         .collect();
     
@@ -202,6 +219,7 @@ fn load_preset(name: String, state: State<AudioState>) -> Result<ChainStatus, St
             uri: p.info.uri.clone(),
             name: p.info.name.clone(),
             plugin_type: p.info.plugin_type.clone(),
+            bypass: p.bypass,
         })
         .collect();
     
@@ -326,6 +344,8 @@ pub fn run() {
             list_plugins,
             load_plugin,
             remove_plugin,
+            toggle_plugin_bypass,
+            move_plugin,
             get_plugin_parameters,
             get_active_plugin_parameters,
             set_parameter,

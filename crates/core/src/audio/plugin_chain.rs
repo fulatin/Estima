@@ -37,6 +37,8 @@ pub struct PluginConfig {
     pub uri: String,
     pub name: String,
     pub parameters: Vec<(String, f32)>,
+    #[serde(default)]
+    pub bypass: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +56,7 @@ pub struct ActivePlugin {
     pub features: Arc<livi::Features>,
     pub parameters: Vec<ParameterInfo>,
     pub parameter_values: Vec<(String, f32)>,
+    pub bypass: bool,
     atom_sequence_inputs: Vec<LV2AtomSequence>,
     atom_sequence_outputs: Vec<LV2AtomSequence>,
 }
@@ -266,6 +269,7 @@ impl PluginChain {
             features: self.features.clone(),
             parameters: parameters.clone(),
             parameter_values,
+            bypass: false,
             atom_sequence_inputs,
             atom_sequence_outputs,
         };
@@ -283,6 +287,45 @@ impl PluginChain {
 
         self.plugins.remove(pos);
         Ok(())
+    }
+
+    pub fn move_plugin(&mut self, id: &str, direction: i32) -> Result<()> {
+        let pos = self
+            .plugins
+            .iter()
+            .position(|p| p.id == id)
+            .ok_or_else(|| anyhow!("Plugin not found: {}", id))?;
+
+        let new_pos = if direction > 0 {
+            (pos + 1).min(self.plugins.len() - 1)
+        } else {
+            pos.saturating_sub(1)
+        };
+
+        if pos != new_pos {
+            let plugin = self.plugins.remove(pos);
+            self.plugins.insert(new_pos, plugin);
+        }
+        Ok(())
+    }
+
+    pub fn toggle_plugin_bypass(&mut self, id: &str) -> Result<bool> {
+        let plugin = self
+            .plugins
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or_else(|| anyhow!("Plugin not found: {}", id))?;
+        plugin.bypass = !plugin.bypass;
+        Ok(plugin.bypass)
+    }
+
+    pub fn get_plugin_bypass(&self, id: &str) -> Result<bool> {
+        let plugin = self
+            .plugins
+            .iter()
+            .find(|p| p.id == id)
+            .ok_or_else(|| anyhow!("Plugin not found: {}", id))?;
+        Ok(plugin.bypass)
     }
 
     pub fn set_parameter(&mut self, plugin_id: &str, param_name: &str, value: f32) -> Result<()> {
@@ -352,6 +395,7 @@ impl PluginChain {
                 uri: p.info.uri.clone(),
                 name: p.info.name.clone(),
                 parameters: p.parameter_values.clone(),
+                bypass: p.bypass,
             })
             .collect();
 
@@ -390,6 +434,9 @@ impl PluginChain {
                 for (param_symbol, value) in &plugin_config.parameters {
                     let _ = self.set_parameter(&id, param_symbol, *value);
                 }
+                if plugin_config.bypass {
+                    let _ = self.toggle_plugin_bypass(&id);
+                }
             }
         }
 
@@ -427,6 +474,9 @@ impl PluginChain {
         }
 
         for plugin in &mut self.plugins {
+            if plugin.bypass {
+                continue;
+            }
             let port_counts = plugin.instance.port_counts();
             let audio_in_count = port_counts.audio_inputs;
             let audio_out_count = port_counts.audio_outputs;

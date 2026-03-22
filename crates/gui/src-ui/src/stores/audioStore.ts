@@ -7,6 +7,7 @@ interface PluginInfo {
   uri: string
   name: string
   plugin_type: string
+  bypass: boolean
 }
 
 interface ParameterInfo {
@@ -65,6 +66,17 @@ export const useAudioStore = defineStore('audio', () => {
     await refreshStatus()
   }
 
+  async function togglePluginBypass(id: string) {
+    const newState = await invoke<boolean>('toggle_plugin_bypass', { id })
+    await refreshStatus()
+    return newState
+  }
+
+  async function movePlugin(id: string, direction: number) {
+    await invoke('move_plugin', { id, direction })
+    await refreshStatus()
+  }
+
   async function getPluginParameters(uri: string) {
     return await invoke<ParameterInfo[]>('get_plugin_parameters', { uri })
   }
@@ -119,6 +131,8 @@ export const useAudioStore = defineStore('audio', () => {
     listPlugins,
     loadPlugin,
     removePlugin,
+    togglePluginBypass,
+    movePlugin,
     getPluginParameters,
     getActivePluginParameters,
     selectPlugin,

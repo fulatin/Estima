@@ -18,10 +18,18 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import PluginManager from './components/PluginManager.vue'
 import EffectChain from './components/EffectChain.vue'
 import ParameterPanel from './components/ParameterPanel.vue'
 import PresetManager from './components/PresetManager.vue'
 import AIChat from './components/AIChat.vue'
 import BypassToggle from './components/BypassToggle.vue'
+import { useAudioStore } from './stores/audioStore'
+
+const store = useAudioStore()
+
+onMounted(async () => {
+  await store.refreshStatus()
+})
 </script>
