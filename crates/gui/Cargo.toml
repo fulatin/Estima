@@ -1,0 +1,27 @@
+[package]
+name = "estima-gui"
+version.workspace = true
+edition.workspace = true
+build = "src-tauri/build.rs"
+
+[[bin]]
+name = "estima-gui"
+path = "src-tauri/src/main.rs"
+
+[dependencies]
+estima-core = { path = "../core" }
+tauri = { workspace = true }
+tauri-plugin-shell = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lib]
+name = "estima_gui_lib"
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

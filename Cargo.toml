@@ -1,0 +1,35 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/cli",
+    "crates/gui",
+    "crates/gui-egui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+livi = { git = "https://github.com/wmedrano/livi-rs" }
+jack = "0.13"
+log = "0.4"
+env_logger = "0.11"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.11", features = ["json"] }
+anyhow = "1"
+uuid = { version = "1", features = ["v4"] }
+crossbeam = "0.8"
+dialoguer = "0.11"
+
+# Tauri dependencies
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-shell = "2"
+
+[profile.release]
+opt-level = 3
+lto = true

@@ -1,0 +1,36 @@
+{
+  "productName": "Estima",
+  "version": "0.1.0",
+  "identifier": "com.estima.app",
+  "build": {
+    "beforeDevCommand": "cd src-ui && npm run dev",
+    "beforeBuildCommand": "cd src-ui && npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "src-ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Estima - AI Audio Effects",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "useHttpsScheme": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png"],
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0"]
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Estima
+Comment=AI Audio Effects
+Exec=/home/jiahui/workspace/estima/run-gui.sh
+Type=Application
+Terminal=false
+Categories=Audio;Music;

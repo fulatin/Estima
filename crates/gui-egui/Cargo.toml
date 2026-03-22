@@ -1,0 +1,17 @@
+[package]
+name = "estima-gui-egui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "estima-gui-egui"
+path = "src/main.rs"
+
+[dependencies]
+estima-core = { path = "../core" }
+eframe = { version = "0.29", features = ["default"] }
+egui = "0.29"
+env_logger = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }

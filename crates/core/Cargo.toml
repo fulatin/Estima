@@ -1,0 +1,21 @@
+[package]
+name = "estima-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+livi = { workspace = true }
+jack = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+crossbeam = { workspace = true }
+
+[lib]
+name = "estima_core"
+path = "src/lib.rs"

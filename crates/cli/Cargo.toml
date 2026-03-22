@@ -1,0 +1,16 @@
+[package]
+name = "estima-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "estima"
+path = "src/main.rs"
+
+[dependencies]
+estima-core = { path = "../core" }
+log = { workspace = true }
+env_logger = { workspace = true }
+anyhow = { workspace = true }
+dialoguer = { workspace = true }
+tokio = { workspace = true }
