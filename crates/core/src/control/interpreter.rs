@@ -153,13 +153,35 @@ Output ONLY the JSON, no explanation text."#;
 pub fn parse_ai_response(response: &str) -> Result<CommandList> {
     log::debug!("Parsing AI response ({} bytes)", response.len());
     log::debug!("Raw response: {}", response.chars().take(500).collect::<String>());
-    
-    let json_str = response
+
+    let trimmed = response
         .trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
+
+    let json_str = if let Some(start) = trimmed.find("{") {
+        let from_start = &trimmed[start..];
+        let mut brace_count = 0;
+        let mut end = from_start.len();
+        for (i, c) in from_start.char_indices() {
+            match c {
+                '{' => brace_count += 1,
+                '}' => {
+                    brace_count -= 1;
+                    if brace_count == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        &from_start[..end]
+    } else {
+        trimmed
+    };
 
     let cmd: CommandList = serde_json::from_str(json_str)?;
     log::debug!("Parsed {} command(s)", cmd.commands.len());
@@ -325,5 +347,34 @@ mod tests {
         let result = parse_ai_response(input).unwrap();
         assert_eq!(result.commands.len(), 1);
         matches!(&result.commands[0], Command::ClearChain { .. });
+    }
+
+    #[test]
+    fn parse_json_with_prefix_text() {
+        let input = r#"Here's a heavy metal chain for you!
+
+{
+  "commands": [
+    {"LoadPlugin": {"uri": "http://example.org/plugin", "position": null}},
+    {"SetParameter": {"plugin_id": "@last", "param_name": "DRIVE", "value": 20.0}}
+  ]
+}
+
+Hope you like it!"#;
+        let result = parse_ai_response(input).unwrap();
+        assert_eq!(result.commands.len(), 2);
+        matches!(&result.commands[0], Command::LoadPlugin { .. });
+    }
+
+    #[test]
+    fn parse_json_with_prefix_and_suffix_text() {
+        let input = r#"Sure, here's what I'll do:
+
+{"commands":[{"ShowStatus":{}}]}
+
+That should show the current status."#;
+        let result = parse_ai_response(input).unwrap();
+        assert_eq!(result.commands.len(), 1);
+        matches!(&result.commands[0], Command::ShowStatus { .. });
     }
 }
