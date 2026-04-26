@@ -75,33 +75,51 @@ impl JackEngine {
             .activate_async((), handler)
             .map_err(|e| anyhow!("Failed to activate JACK client: {:?}", e))?;
 
-        let ports = async_client
+        let system_capture_ports: Vec<_> = async_client
             .as_client()
-            .ports(None, Some("audio"), jack::PortFlags::IS_OUTPUT);
+            .ports(None, Some("audio"), jack::PortFlags::IS_OUTPUT)
+            .into_iter()
+            .filter(|p| p.starts_with("system:capture_"))
+            .collect();
+
+        log::info!("Available system capture ports: {:?}", system_capture_ports);
 
         let client = async_client.as_client();
-        if let Some(input_port) = ports.first() {
+        if let Some(input_port) = system_capture_ports.first() {
             let port_name = format!("{}:in_left", client_name);
+            log::info!("Connecting {} -> {}", input_port, port_name);
             client.connect_ports_by_name(input_port, &port_name)?;
         }
-        if let Some(input_port) = ports.get(1) {
+        if let Some(input_port) = system_capture_ports.get(1) {
             let port_name = format!("{}:in_right", client_name);
+            log::info!("Connecting {} -> {}", input_port, port_name);
             client.connect_ports_by_name(input_port, &port_name)?;
-        } else if let Some(input_port) = ports.first() {
+        } else if let Some(input_port) = system_capture_ports.first() {
             let port_name = format!("{}:in_right", client_name);
+            log::info!("Connecting {} -> {} (mono)", input_port, port_name);
             client.connect_ports_by_name(input_port, &port_name)?;
         }
 
-        let playback_ports = client.ports(None, Some("audio"), jack::PortFlags::IS_INPUT);
-        if let Some(output_port) = playback_ports.first() {
+        let system_playback_ports: Vec<_> = client
+            .ports(None, Some("audio"), jack::PortFlags::IS_INPUT)
+            .into_iter()
+            .filter(|p| p.starts_with("system:playback_"))
+            .collect();
+
+        log::info!("Available system playback ports: {:?}", system_playback_ports);
+
+        if let Some(output_port) = system_playback_ports.first() {
             let port_name = format!("{}:out_left", client_name);
+            log::info!("Connecting {} -> {}", port_name, output_port);
             client.connect_ports_by_name(&port_name, output_port)?;
         }
-        if let Some(output_port) = playback_ports.get(1) {
+        if let Some(output_port) = system_playback_ports.get(1) {
             let port_name = format!("{}:out_right", client_name);
+            log::info!("Connecting {} -> {}", port_name, output_port);
             client.connect_ports_by_name(&port_name, output_port)?;
-        } else if let Some(output_port) = playback_ports.first() {
+        } else if let Some(output_port) = system_playback_ports.first() {
             let port_name = format!("{}:out_right", client_name);
+            log::info!("Connecting {} -> {} (mono)", port_name, output_port);
             client.connect_ports_by_name(&port_name, output_port)?;
         }
 
