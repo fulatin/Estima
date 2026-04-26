@@ -12,7 +12,7 @@ Estima is a professional audio effects processor that combines LV2 plugins with 
 - **Multiple AI Providers**: Support for SiliconFlow, DeepSeek, OpenAI, Anthropic, and Ollama
 - **Preset System**: Save and load effect chain presets
 - **Bypass Mode**: Quickly toggle all effects on/off
-- **Multiple Interfaces**: CLI, Tauri GUI (Vue 3), and egui GUI
+- **Multiple Interfaces**: CLI, Tauri GUI (Vue 3)
 
 ## Requirements
 
@@ -54,7 +54,6 @@ cargo build --release
 # Or build specific targets
 cargo build --release -p estima-cli      # CLI only
 cargo build --release -p estima-gui      # Tauri GUI
-cargo build --release -p estima-gui-egui # egui GUI
 ```
 
 ### Frontend Build (Tauri GUI)
@@ -119,13 +118,6 @@ jackd -d alsa -r 48000 -p 256 &
 WEBKIT_DISABLE_COMPOSITING_MODE=1 ./target/release/estima-gui
 ```
 
-**egui GUI (lightweight fallback):**
-```bash
-./run-gui-egui.sh
-# or
-./target/release/estima-gui-egui
-```
-
 ## AI Configuration
 
 Estima auto-detects AI providers from environment variables. Set one of the following:
@@ -164,7 +156,6 @@ estima/
 │   │           └── interpreter.rs    # Command parsing
 │   ├── cli/            # CLI application
 │   ├── gui/            # Tauri + Vue 3 GUI
-│   └── gui-egui/       # egui GUI (fallback)
 ```
 
 ## Presets

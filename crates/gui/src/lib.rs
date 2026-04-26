@@ -1,10 +1,22 @@
-use tauri::State;
-use std::sync::{Arc, Mutex};
-use estima_core::audio::{AudioState as JackAudioState, JackEngine, PluginChain};
-use estima_core::ai::{AIProvider, OpenAICompatibleProvider, AIProviderType};
-use estima_core::control::{parse_ai_response, CommandList};
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
+use estima_core::ai::{
+    AIProvider, AIProviderType, ChatMessage, ChatRequest, MessageRole, OpenAICompatibleProvider,
+    ToolCallRequest, get_tool_definitions,
+    tools::{
+        FunctionCallRequest, GetPluginDetailsArgs, SearchPluginsArgs, TOOL_GET_PLUGIN_DETAILS,
+        TOOL_LIST_PLUGIN_TYPES, TOOL_SEARCH_PLUGINS, parse_tool_arguments,
+    },
+};
+use estima_core::audio::{AudioState as JackAudioState, JackEngine, PluginChain};
+use estima_core::control::{
+    CommandList, SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_CONTEXT, parse_ai_response,
+};
+use estima_core::memory::{
+    Conversation, FunctionCall, MemoryStorage, MessageRole as MemoryRole, ToolCall,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
+use tauri::State;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PluginInfo {
@@ -32,6 +44,12 @@ pub struct ChainStatus {
     pub last_loaded_id: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct HistoryMessage {
+    pub role: String,
+    pub content: String,
+}
+
 pub struct AudioState {
     pub chain: Arc<Mutex<PluginChain>>,
     pub last_loaded_id: Arc<Mutex<Option<String>>>,
@@ -39,11 +57,88 @@ pub struct AudioState {
     pub started: bool,
 }
 
+pub struct AppState {
+    pub memory_storage: MemoryStorage,
+    pub conversation: Arc<Mutex<Conversation>>,
+}
+
+fn execute_tool(tool_name: &str, arguments: &str, chain: &PluginChain) -> Result<String> {
+    log::debug!("Executing tool: {} with args: {}", tool_name, arguments);
+    let result = match tool_name {
+        TOOL_SEARCH_PLUGINS => {
+            let args: SearchPluginsArgs = parse_tool_arguments(arguments)?;
+            let results = chain.search_plugins(&args.query);
+            let output: Vec<String> = results
+                .iter()
+                .map(|p| format!("- {} ({})\n  URI: {}", p.name, p.plugin_type, p.uri))
+                .collect();
+            if output.is_empty() {
+                Ok("No plugins found matching the query.".to_string())
+            } else {
+                Ok(format!(
+                    "Found {} plugin(s):\n{}",
+                    results.len(),
+                    output.join("\n")
+                ))
+            }
+        }
+        TOOL_GET_PLUGIN_DETAILS => {
+            let args: GetPluginDetailsArgs = parse_tool_arguments(arguments)?;
+            if let Some(params) = chain.get_plugin_parameters(&args.uri) {
+                let plugin_info = chain
+                    .search_plugins(&args.uri)
+                    .first()
+                    .map(|p| format!("{} ({})", p.name, p.plugin_type))
+                    .unwrap_or_else(|| "Unknown Plugin".to_string());
+
+                let params_str: Vec<String> = params
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "  - {}: {:.2} - {:.2} (default: {:.2})",
+                            p.name, p.min, p.max, p.default
+                        )
+                    })
+                    .collect();
+
+                Ok(format!(
+                    "Plugin: {}\nURI: {}\nParameters:\n{}",
+                    plugin_info,
+                    args.uri,
+                    params_str.join("\n")
+                ))
+            } else {
+                Ok(format!("Plugin not found: {}", args.uri))
+            }
+        }
+        TOOL_LIST_PLUGIN_TYPES => {
+            let plugins = chain.list_available_plugins();
+            let mut types: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for p in plugins {
+                types.insert(p.plugin_type.as_str());
+            }
+            let mut type_list: Vec<&str> = types.into_iter().collect();
+            type_list.sort();
+            Ok(format!("Available plugin types: {}", type_list.join(", ")))
+        }
+        _ => Ok(format!("Unknown tool: {}", tool_name)),
+    };
+    match &result {
+        Ok(r) => log::debug!("Tool {} result: {}", tool_name, r.chars().take(200).collect::<String>()),
+        Err(e) => log::debug!("Tool {} error: {}", tool_name, e),
+    }
+    result
+}
+
 #[tauri::command]
-fn list_plugins(filter: Option<String>, state: State<AudioState>) -> Result<Vec<PluginInfo>, String> {
+fn list_plugins(
+    filter: Option<String>,
+    state: State<AudioState>,
+) -> Result<Vec<PluginInfo>, String> {
     let chain = state.chain.lock().map_err(|e| e.to_string())?;
     let plugins: Vec<PluginInfo> = if let Some(f) = filter {
-        chain.search_plugins(&f)
+        chain
+            .search_plugins(&f)
             .into_iter()
             .map(|p| PluginInfo {
                 id: p.uri.clone(),
@@ -54,7 +149,8 @@ fn list_plugins(filter: Option<String>, state: State<AudioState>) -> Result<Vec<
             })
             .collect()
     } else {
-        chain.list_available_plugins()
+        chain
+            .list_available_plugins()
             .iter()
             .map(|p| PluginInfo {
                 id: p.uri.clone(),
@@ -71,16 +167,19 @@ fn list_plugins(filter: Option<String>, state: State<AudioState>) -> Result<Vec<
 #[tauri::command]
 fn load_plugin(uri: String, state: State<AudioState>) -> Result<PluginInfo, String> {
     let mut chain = state.chain.lock().map_err(|e| e.to_string())?;
-    let (id, _params) = chain.load_plugin(&uri, state.sample_rate).map_err(|e| e.to_string())?;
-    
+    let (id, _params) = chain
+        .load_plugin(&uri, state.sample_rate)
+        .map_err(|e| e.to_string())?;
+
     let mut last_id = state.last_loaded_id.lock().map_err(|e| e.to_string())?;
     *last_id = Some(id.clone());
-    
-    let plugin = chain.get_active_plugins()
+
+    let plugin = chain
+        .get_active_plugins()
         .iter()
         .find(|p| p.id == id)
         .ok_or("Plugin not found after loading")?;
-    
+
     Ok(PluginInfo {
         id,
         uri,
@@ -94,7 +193,7 @@ fn load_plugin(uri: String, state: State<AudioState>) -> Result<PluginInfo, Stri
 fn remove_plugin(id: String, state: State<AudioState>) -> Result<(), String> {
     let mut chain = state.chain.lock().map_err(|e| e.to_string())?;
     chain.remove_plugin(&id).map_err(|e| e.to_string())?;
-    
+
     let mut last_id = state.last_loaded_id.lock().map_err(|e| e.to_string())?;
     if last_id.as_ref() == Some(&id) {
         *last_id = None;
@@ -115,28 +214,42 @@ fn move_plugin(id: String, direction: i32, state: State<AudioState>) -> Result<(
 }
 
 #[tauri::command]
-fn get_plugin_parameters(uri: String, state: State<AudioState>) -> Result<Vec<ParameterInfo>, String> {
+fn get_plugin_parameters(
+    uri: String,
+    state: State<AudioState>,
+) -> Result<Vec<ParameterInfo>, String> {
     let chain = state.chain.lock().map_err(|e| e.to_string())?;
-    let params = chain.get_plugin_parameters(&uri)
+    let params = chain
+        .get_plugin_parameters(&uri)
         .ok_or("Plugin not found")?;
-    
-    Ok(params.into_iter().map(|p| ParameterInfo {
-        name: p.name,
-        symbol: p.symbol,
-        default: p.default,
-        min: p.min,
-        max: p.max,
-        current: p.default,
-    }).collect())
+
+    Ok(params
+        .into_iter()
+        .map(|p| ParameterInfo {
+            name: p.name,
+            symbol: p.symbol,
+            default: p.default,
+            min: p.min,
+            max: p.max,
+            current: p.default,
+        })
+        .collect())
 }
 
 #[tauri::command]
-fn get_active_plugin_parameters(plugin_id: String, state: State<AudioState>) -> Result<Vec<ParameterInfo>, String> {
+fn get_active_plugin_parameters(
+    plugin_id: String,
+    state: State<AudioState>,
+) -> Result<Vec<ParameterInfo>, String> {
     let chain = state.chain.lock().map_err(|e| e.to_string())?;
-    let plugin = chain.get_plugin_by_id(&plugin_id)
+    let plugin = chain
+        .get_plugin_by_id(&plugin_id)
         .ok_or("Plugin not found")?;
-    
-    Ok(plugin.parameters.iter().zip(plugin.parameter_values.iter())
+
+    Ok(plugin
+        .parameters
+        .iter()
+        .zip(plugin.parameter_values.iter())
         .map(|(p, (_, value))| ParameterInfo {
             name: p.name.clone(),
             symbol: p.symbol.clone(),
@@ -149,18 +262,28 @@ fn get_active_plugin_parameters(plugin_id: String, state: State<AudioState>) -> 
 }
 
 #[tauri::command]
-fn set_parameter(plugin_id: String, param_name: String, value: f32, state: State<AudioState>) -> Result<(), String> {
+fn set_parameter(
+    plugin_id: String,
+    param_name: String,
+    value: f32,
+    state: State<AudioState>,
+) -> Result<(), String> {
     let mut chain = state.chain.lock().map_err(|e| e.to_string())?;
-    
+
     let target_id = if plugin_id == "@last" {
-        state.last_loaded_id.lock().map_err(|e| e.to_string())?
+        state
+            .last_loaded_id
+            .lock()
+            .map_err(|e| e.to_string())?
             .clone()
             .ok_or("No plugin has been loaded yet")?
     } else {
         plugin_id
     };
-    
-    chain.set_parameter(&target_id, &param_name, value).map_err(|e| e.to_string())?;
+
+    chain
+        .set_parameter(&target_id, &param_name, value)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -168,8 +291,9 @@ fn set_parameter(plugin_id: String, param_name: String, value: f32, state: State
 fn get_chain_status(state: State<AudioState>) -> Result<ChainStatus, String> {
     let chain = state.chain.lock().map_err(|e| e.to_string())?;
     let last_id = state.last_loaded_id.lock().map_err(|e| e.to_string())?;
-    
-    let plugins: Vec<PluginInfo> = chain.get_active_plugins()
+
+    let plugins: Vec<PluginInfo> = chain
+        .get_active_plugins()
         .iter()
         .map(|p| PluginInfo {
             id: p.id.clone(),
@@ -179,7 +303,7 @@ fn get_chain_status(state: State<AudioState>) -> Result<ChainStatus, String> {
             bypass: p.bypass,
         })
         .collect();
-    
+
     Ok(ChainStatus {
         plugins,
         bypass: chain.bypass(),
@@ -205,14 +329,17 @@ fn save_preset(name: String, state: State<AudioState>) -> Result<String, String>
 fn load_preset(name: String, state: State<AudioState>) -> Result<ChainStatus, String> {
     let mut chain = state.chain.lock().map_err(|e| e.to_string())?;
     let path = format!("{}.estima.json", name);
-    let _config = chain.load_config(&path, state.sample_rate).map_err(|e| e.to_string())?;
-    
+    let _config = chain
+        .load_config(&path, state.sample_rate)
+        .map_err(|e| e.to_string())?;
+
     let mut last_id = state.last_loaded_id.lock().map_err(|e| e.to_string())?;
     if let Some(last) = chain.get_active_plugins().last() {
         *last_id = Some(last.id.clone());
     }
-    
-    let plugins: Vec<PluginInfo> = chain.get_active_plugins()
+
+    let plugins: Vec<PluginInfo> = chain
+        .get_active_plugins()
         .iter()
         .map(|p| PluginInfo {
             id: p.id.clone(),
@@ -222,7 +349,7 @@ fn load_preset(name: String, state: State<AudioState>) -> Result<ChainStatus, St
             bypass: p.bypass,
         })
         .collect();
-    
+
     Ok(ChainStatus {
         plugins,
         bypass: chain.bypass(),
@@ -237,41 +364,272 @@ fn list_presets() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn ai_chat(message: String, state: State<'_, AudioState>) -> Result<CommandList, String> {
+fn get_history(state: State<AppState>) -> Result<Vec<HistoryMessage>, String> {
+    let conversation = state.conversation.lock().map_err(|e| e.to_string())?;
+    Ok(conversation
+        .messages
+        .iter()
+        .map(|m| HistoryMessage {
+            role: match m.role {
+                MemoryRole::System => "system",
+                MemoryRole::User => "user",
+                MemoryRole::Assistant => "assistant",
+                MemoryRole::Tool => "tool",
+            }
+            .to_string(),
+            content: m.content.clone(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn clear_history(state: State<AppState>) -> Result<(), String> {
+    let mut conversation = state.conversation.lock().map_err(|e| e.to_string())?;
+    conversation.clear();
+    state
+        .memory_storage
+        .save(&conversation)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn ai_chat(
+    message: String,
+    audio_state: State<'_, AudioState>,
+    app_state: State<'_, AppState>,
+) -> Result<CommandList, String> {
+    log::debug!("ai_chat called with message: {}", message);
     use std::env;
-    
     let ai_provider: Box<dyn AIProvider> = if let Ok(api_key) = env::var("SILICONFLOW_API_KEY") {
         let model = env::var("SILICONFLOW_MODEL").ok();
+        log::debug!("Using SiliconFlow provider, model: {:?}", model);
         Box::new(OpenAICompatibleProvider::new(
             AIProviderType::SiliconFlow,
             &api_key,
-            model.as_deref()
+            model.as_deref(),
+        ))
+    } else if let Ok(api_key) = env::var("DEEPSEEK_API_KEY") {
+        let model = env::var("DEEPSEEK_MODEL")
+            .or_else(|_| env::var("AI_MODEL"))
+            .or_else(|_| env::var("OPENAI_MODEL"))
+            .ok();
+        log::debug!("Using DeepSeek provider, model: {:?}", model);
+        Box::new(OpenAICompatibleProvider::new(
+            AIProviderType::DeepSeek,
+            &api_key,
+            model.as_deref(),
         ))
     } else if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         let model = env::var("OPENAI_MODEL").ok();
+        log::debug!("Using OpenAI provider, model: {:?}", model);
         Box::new(OpenAICompatibleProvider::new(
             AIProviderType::OpenAI,
             &api_key,
-            model.as_deref()
+            model.as_deref(),
         ))
     } else {
-        return Err("No AI API key configured. Set SILICONFLOW_API_KEY or OPENAI_API_KEY".to_string());
+        log::error!("No AI API key configured");
+        return Err("No AI API key configured. Set SILICONFLOW_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY".to_string());
     };
-    
+
+    {
+        let mut conversation = app_state.conversation.lock().map_err(|e| e.to_string())?;
+        conversation.add_message(MemoryRole::User, &message);
+    }
+
+    let response = if ai_provider.supports_tools() {
+        log::debug!("Provider supports tools, using process_with_tools");
+        process_with_tools(&ai_provider, &message, &audio_state, &app_state).await?
+    } else {
+        log::debug!("Provider does not support tools, using process_without_tools");
+        process_without_tools(&ai_provider, &message, &audio_state, &app_state).await?
+    };
+
+    log::debug!("AI response received: {}", response.chars().take(200).collect::<String>());
+
+    {
+        let mut conversation = app_state.conversation.lock().map_err(|e| e.to_string())?;
+        conversation.add_message(MemoryRole::Assistant, &response);
+        app_state
+            .memory_storage
+            .save(&conversation)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let commands = parse_ai_response(&response).map_err(|e| {
+        log::error!("Failed to parse AI response: {}", e);
+        e.to_string()
+    })?;
+    log::debug!("Returning {} command(s)", commands.commands.len());
+    Ok(commands)
+}
+
+async fn process_with_tools(
+    ai_provider: &Box<dyn AIProvider>,
+    _message: &str,
+    audio_state: &State<'_, AudioState>,
+    app_state: &State<'_, AppState>,
+) -> Result<String, String> {
+    log::debug!("process_with_tools: starting");
+    const MAX_TOOL_ITERATIONS: usize = 5;
+
+    let tools = get_tool_definitions();
+    let history_messages: Vec<ChatMessage> = {
+        let conversation = app_state.conversation.lock().map_err(|e| e.to_string())?;
+        conversation
+            .messages
+            .iter()
+            .filter(|m| m.role != MemoryRole::System)
+            .map(|m| ChatMessage {
+                role: match m.role {
+                    MemoryRole::User => MessageRole::User,
+                    MemoryRole::Assistant => MessageRole::Assistant,
+                    MemoryRole::Tool => MessageRole::Tool,
+                    MemoryRole::System => MessageRole::System,
+                },
+                content: m.content.clone(),
+                name: m.name.clone(),
+                tool_call_id: m.tool_call_id.clone(),
+                tool_calls: m.tool_calls.clone().map(|calls| {
+                    calls
+                        .iter()
+                        .map(|c| ToolCallRequest {
+                            id: c.id.clone(),
+                            call_type: c.call_type.clone(),
+                            function: FunctionCallRequest {
+                                name: c.function.name.clone(),
+                                arguments: c.function.arguments.clone(),
+                            },
+                        })
+                        .collect()
+                }),
+                reasoning_content: m.reasoning_content.clone(),
+            })
+            .collect()
+    };
+
+    let mut request = ChatRequest::new()
+        .with_system_prompt(SYSTEM_PROMPT)
+        .with_tools(tools);
+
+    for msg in history_messages {
+        request = request.add_full_message(msg);
+    }
+
+    for iteration in 0..MAX_TOOL_ITERATIONS {
+        log::debug!("Tool iteration {}", iteration + 1);
+        let response = ai_provider
+            .chat_with_tools(request.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if let Some(ref tool_calls) = response.tool_calls {
+            if !tool_calls.is_empty() {
+                log::debug!("Received {} tool call(s)", tool_calls.len());
+                let tool_calls_for_history: Vec<ToolCall> = tool_calls
+                    .iter()
+                    .map(|tc| ToolCall {
+                        id: tc.id.clone(),
+                        call_type: tc.call_type.clone(),
+                        function: FunctionCall {
+                            name: tc.function.name.clone(),
+                            arguments: tc.function.arguments.clone(),
+                        },
+                    })
+                    .collect();
+
+                {
+                    let mut conv = app_state.conversation.lock().map_err(|e| e.to_string())?;
+                    conv.add_message_with_meta(
+                        MemoryRole::Assistant,
+                        response.content.as_deref().unwrap_or(""),
+                        None,
+                        None,
+                        Some(tool_calls_for_history),
+                        response.reasoning_content.clone(),
+                    );
+                }
+
+                let tool_results: Vec<(String, String, String)> = {
+                    let chain = audio_state.chain.lock().map_err(|e| e.to_string())?;
+                    tool_calls
+                        .iter()
+                        .map(|tool_call| {
+                            let result = execute_tool(
+                                &tool_call.function.name,
+                                &tool_call.function.arguments,
+                                &chain,
+                            )
+                            .unwrap_or_else(|e| format!("Error: {}", e));
+                            (
+                                tool_call.id.clone(),
+                                tool_call.function.name.clone(),
+                                result,
+                            )
+                        })
+                        .collect()
+                };
+
+                request = request.add_assistant_with_tools_and_reasoning(
+                    response.content.as_deref().unwrap_or(""),
+                    tool_calls.clone(),
+                    response.reasoning_content.clone(),
+                );
+
+                for (tool_call_id, tool_name, result) in tool_results {
+                    log::debug!("Adding tool result for {}: {} bytes", tool_name, result.len());
+                    {
+                        let mut conv = app_state.conversation.lock().map_err(|e| e.to_string())?;
+                        conv.add_tool_result(&tool_call_id, &tool_name, &result);
+                    }
+                    request = request.add_tool_result(&tool_call_id, &tool_name, &result);
+                }
+
+                log::debug!("Continuing to next iteration with tool results");
+                continue;
+            }
+        }
+
+        if let Some(content) = response.content {
+            log::debug!("Got final content response");
+            return Ok(content);
+        }
+
+        log::warn!("Empty response from AI");
+        return Err("Empty response from AI".to_string());
+    }
+
+    log::warn!("Maximum tool iterations reached");
+    Err("Maximum tool iterations reached".to_string())
+}
+
+async fn process_without_tools(
+    ai_provider: &Box<dyn AIProvider>,
+    message: &str,
+    audio_state: &State<'_, AudioState>,
+    app_state: &State<'_, AppState>,
+) -> Result<String, String> {
     let (plugins_info, active_plugins, bypass) = {
-        let chain = state.chain.lock().map_err(|e| e.to_string())?;
+        let chain = audio_state.chain.lock().map_err(|e| e.to_string())?;
         let plugins_info: Vec<String> = chain
             .list_available_plugins()
             .iter()
-            .take(20)
+            .take(30)
             .filter_map(|p| {
                 let params = chain.get_plugin_parameters(&p.uri)?;
-                let params_str: Vec<String> = params.iter()
-                    .take(8)
+                let params_str: Vec<String> = params
+                    .iter()
+                    .take(10)
                     .map(|x| format!("{}:{:.0}-{:.0}", x.name, x.min, x.max))
                     .collect();
-                Some(format!("- {} ({}) [{}]\n  params: {}",
-                    p.name, p.plugin_type, p.uri, params_str.join(", ")))
+                Some(format!(
+                    "- {} ({}) [{}]\n  params: {}",
+                    p.name,
+                    p.plugin_type,
+                    p.uri,
+                    params_str.join(", ")
+                ))
             })
             .collect();
 
@@ -279,47 +637,89 @@ async fn ai_chat(message: String, state: State<'_, AudioState>) -> Result<Comman
             .get_active_plugins()
             .iter()
             .map(|p| {
-                let params_str: Vec<String> = p.parameters.iter()
+                let params_str: Vec<String> = p
+                    .parameters
+                    .iter()
                     .take(5)
                     .map(|x| x.name.clone())
                     .collect();
-                format!("- {} (ID: {}) params: {}", p.info.name, p.id, params_str.join(", "))
+                format!(
+                    "- {} (ID: {}) params: {}",
+                    p.info.name,
+                    p.id,
+                    params_str.join(", ")
+                )
             })
             .collect();
-        
+
         (plugins_info, active_plugins, chain.bypass())
     };
 
+    let history_context: Vec<String> = {
+        let conversation = app_state.conversation.lock().map_err(|e| e.to_string())?;
+        let mut history_vec: Vec<_> = conversation
+            .messages
+            .iter()
+            .filter(|m| matches!(m.role, MemoryRole::User | MemoryRole::Assistant))
+            .collect();
+        history_vec.reverse();
+        history_vec
+            .iter()
+            .take(6)
+            .rev()
+            .map(|m| {
+                format!(
+                    "{}: {}",
+                    match m.role {
+                        MemoryRole::User => "User",
+                        MemoryRole::Assistant => "Assistant",
+                        _ => "",
+                    },
+                    m.content.chars().take(200).collect::<String>()
+                )
+            })
+            .collect()
+    };
+
     let prompt = format!(
-        "User request: {}\n\nAvailable plugins with parameters:\n{}\n\nActive plugins:\n{}\n\nBypass: {}",
+        "Recent conversation:\n{}\n\nUser request: {}\n\nAvailable plugins with parameters:\n{}\n\nActive plugins:\n{}\n\nBypass: {}",
+        history_context.join("\n"),
         message,
         plugins_info.join("\n"),
-        if active_plugins.is_empty() { "None".to_string() } else { active_plugins.join("\n") },
+        if active_plugins.is_empty() {
+            "None".to_string()
+        } else {
+            active_plugins.join("\n")
+        },
         if bypass { "ON" } else { "OFF" }
     );
 
-    let system_prompt = estima_core::control::SYSTEM_PROMPT;
-    let response = ai_provider.chat(&prompt, Some(system_prompt)).await
+    let response = ai_provider
+        .chat(&prompt, Some(SYSTEM_PROMPT_WITH_CONTEXT))
+        .await
         .map_err(|e| e.to_string())?;
-    
-    let commands = parse_ai_response(&response).map_err(|e| e.to_string())?;
-    Ok(commands)
+
+    Ok(response)
 }
 
 pub fn run() {
     let chain = Arc::new(Mutex::new(PluginChain::new().unwrap()));
-    
+
     let audio_state = Arc::new(Mutex::new(JackAudioState {
         process_fn: Box::new(|_input: &[f32], _output: &mut [f32], _nframes: usize| {}),
     }));
-    
+
     let jack_engine = JackEngine::new("estima", audio_state.clone())
         .expect("Failed to create JACK client. Is JACK running?");
-    
+
     log::info!("JACK client '{}' created", jack_engine.client_name());
     let sample_rate = jack_engine.sample_rate() as f64;
-    log::info!("Sample rate: {}, Buffer size: {}", sample_rate, jack_engine.buffer_size());
-    
+    log::info!(
+        "Sample rate: {}, Buffer size: {}",
+        sample_rate,
+        jack_engine.buffer_size()
+    );
+
     {
         let chain_clone = chain.clone();
         let mut state = audio_state.lock().unwrap();
@@ -329,8 +729,14 @@ pub fn run() {
             }
         });
     }
-    
+
     let _ = jack_engine;
+
+    let memory_storage = MemoryStorage::new().expect("Failed to initialize memory storage");
+    let conversation = match memory_storage.load() {
+        Ok(conv) => Arc::new(Mutex::new(conv)),
+        Err(_) => Arc::new(Mutex::new(Conversation::new())),
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -339,6 +745,10 @@ pub fn run() {
             last_loaded_id: Arc::new(Mutex::new(None)),
             sample_rate,
             started: true,
+        })
+        .manage(AppState {
+            memory_storage,
+            conversation,
         })
         .invoke_handler(tauri::generate_handler![
             list_plugins,
@@ -355,6 +765,8 @@ pub fn run() {
             load_preset,
             list_presets,
             ai_chat,
+            get_history,
+            clear_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use super::AIProvider;
+use super::provider::{AIProvider, ChatRequest, ChatResponse};
 
 #[derive(Debug, Serialize)]
 struct OllamaRequest {
@@ -63,6 +63,10 @@ impl OllamaProvider {
 #[async_trait]
 impl AIProvider for OllamaProvider {
     async fn chat(&self, message: &str, system_prompt: Option<&str>) -> Result<String> {
+        log::debug!("[Ollama] Starting chat request");
+        log::debug!("[Ollama] Model: {}", self.model);
+        log::debug!("[Ollama] Message: {}", message);
+        
         let mut messages = Vec::new();
         
         if let Some(prompt) = system_prompt {
@@ -83,17 +87,25 @@ impl AIProvider for OllamaProvider {
             stream: false,
         };
 
+        log::debug!("[Ollama] Sending request to {}", self.base_url);
+
         let url = format!("{}/api/chat", self.base_url);
         let response = self.client
             .post(&url)
             .json(&request)
             .send()
             .await
-            .map_err(|e| anyhow!("Failed to connect to Ollama: {}", e))?;
+            .map_err(|e| {
+                log::error!("[Ollama] Connection failed: {}", e);
+                anyhow!("Failed to connect to Ollama: {}", e)
+            })?;
+
+        log::debug!("[Ollama] Response status: {}", response.status());
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            log::error!("[Ollama] API error: {} - {}", status, body);
             return Err(anyhow!("Ollama API error: {} - {}", status, body));
         }
 
@@ -102,10 +114,84 @@ impl AIProvider for OllamaProvider {
             .await
             .map_err(|e| anyhow!("Failed to parse Ollama response: {}", e))?;
 
+        log::debug!("[Ollama] Response: {}", ollama_response.message.content.chars().take(200).collect::<String>());
+
         Ok(ollama_response.message.content)
     }
 
     fn provider_name(&self) -> &str {
         "Ollama"
+    }
+
+    async fn chat_with_tools(&self, request: ChatRequest) -> Result<ChatResponse> {
+        log::debug!("[Ollama] Starting chat_with_tools request");
+        log::debug!("[Ollama] Model: {}", self.model);
+        log::debug!("[Ollama] Messages count: {}", request.messages.len());
+        
+        let mut messages = Vec::new();
+        
+        if let Some(ref prompt) = request.system_prompt {
+            messages.push(OllamaMessage {
+                role: "system".to_string(),
+                content: prompt.to_string(),
+            });
+        }
+        
+        for msg in &request.messages {
+            messages.push(OllamaMessage {
+                role: match msg.role {
+                    super::provider::MessageRole::System => "system",
+                    super::provider::MessageRole::User => "user",
+                    super::provider::MessageRole::Assistant => "assistant",
+                    super::provider::MessageRole::Tool => "user",
+                }.to_string(),
+                content: if msg.role == super::provider::MessageRole::Tool {
+                    format!("[Tool result]: {}", msg.content)
+                } else {
+                    msg.content.clone()
+                },
+            });
+        }
+
+        let ollama_request = OllamaRequest {
+            model: self.model.clone(),
+            messages,
+            stream: false,
+        };
+
+        log::debug!("[Ollama] Sending request to {}", self.base_url);
+
+        let url = format!("{}/api/chat", self.base_url);
+        let response = self.client
+            .post(&url)
+            .json(&ollama_request)
+            .send()
+            .await
+            .map_err(|e| {
+                log::error!("[Ollama] Connection failed: {}", e);
+                anyhow!("Failed to connect to Ollama: {}", e)
+            })?;
+
+        log::debug!("[Ollama] Response status: {}", response.status());
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            log::error!("[Ollama] API error: {} - {}", status, body);
+            return Err(anyhow!("Ollama API error: {} - {}", status, body));
+        }
+
+        let ollama_response: OllamaResponse = response
+            .json()
+            .await
+            .map_err(|e| anyhow!("Failed to parse Ollama response: {}", e))?;
+
+        log::debug!("[Ollama] Response: {}", ollama_response.message.content.chars().take(200).collect::<String>());
+
+        Ok(ChatResponse {
+            content: Some(ollama_response.message.content),
+            tool_calls: None,
+            reasoning_content: None,
+        })
     }
 }

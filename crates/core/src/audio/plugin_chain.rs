@@ -607,3 +607,104 @@ impl PluginChain {
         self.plugins.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_reverb() {
+        assert_eq!(PluginChain::classify_plugin("Reverb Plus"), "reverb");
+        assert_eq!(PluginChain::classify_plugin("Plate Reverb"), "reverb");
+        assert_eq!(PluginChain::classify_plugin("Hall Simulator"), "reverb");
+        assert_eq!(PluginChain::classify_plugin("Room Ambience"), "reverb");
+    }
+
+    #[test]
+    fn classify_delay() {
+        assert_eq!(PluginChain::classify_plugin("Simple Delay"), "delay");
+        assert_eq!(PluginChain::classify_plugin("Echo Machine"), "delay");
+    }
+
+    #[test]
+    fn classify_distortion() {
+        assert_eq!(PluginChain::classify_plugin("Distortion"), "distortion");
+        assert_eq!(PluginChain::classify_plugin("Overdrive"), "distortion");
+        assert_eq!(PluginChain::classify_plugin("Fuzz Box"), "distortion");
+        assert_eq!(PluginChain::classify_plugin("Bit Crusher"), "distortion");
+    }
+
+    #[test]
+    fn classify_dynamics() {
+        assert_eq!(PluginChain::classify_plugin("Compressor"), "dynamics");
+        assert_eq!(PluginChain::classify_plugin("Limiter"), "dynamics");
+    }
+
+    #[test]
+    fn classify_eq() {
+        assert_eq!(PluginChain::classify_plugin("EQ 10-band"), "eq");
+        assert_eq!(PluginChain::classify_plugin("Equalizer"), "eq");
+        assert_eq!(PluginChain::classify_plugin("High Pass Filter"), "eq");
+    }
+
+    #[test]
+    fn classify_modulation() {
+        assert_eq!(PluginChain::classify_plugin("Chorus"), "modulation");
+        assert_eq!(PluginChain::classify_plugin("Flanger"), "modulation");
+        assert_eq!(PluginChain::classify_plugin("Phaser"), "modulation");
+    }
+
+    #[test]
+    fn classify_amp() {
+        assert_eq!(PluginChain::classify_plugin("Guitar Amp"), "amp");
+        assert_eq!(PluginChain::classify_plugin("Cabinet Sim"), "amp");
+        assert_eq!(PluginChain::classify_plugin("Bass Cab"), "amp");
+    }
+
+    #[test]
+    fn classify_gain() {
+        assert_eq!(PluginChain::classify_plugin("Gain"), "gain");
+        assert_eq!(PluginChain::classify_plugin("Volume Control"), "gain");
+    }
+
+    #[test]
+    fn classify_noise() {
+        assert_eq!(PluginChain::classify_plugin("Noise Gate"), "noise");
+        assert_eq!(PluginChain::classify_plugin("Noise Suppressor"), "noise");
+    }
+
+    #[test]
+    fn classify_other() {
+        assert_eq!(PluginChain::classify_plugin("Unknown Plugin"), "other");
+        assert_eq!(PluginChain::classify_plugin("Some Effect"), "other");
+    }
+
+    #[test]
+    fn classify_case_insensitive() {
+        assert_eq!(PluginChain::classify_plugin("REVERB"), "reverb");
+        assert_eq!(PluginChain::classify_plugin("Delay XL"), "delay");
+        assert_eq!(PluginChain::classify_plugin("CHORUS"), "modulation");
+    }
+
+    #[test]
+    fn chain_config_json_roundtrip() {
+        let config = ChainConfig {
+            version: "1.0".to_string(),
+            name: "test-preset".to_string(),
+            bypass: false,
+            plugins: vec![PluginConfig {
+                uri: "http://example.org/reverb".to_string(),
+                name: "Reverb".to_string(),
+                parameters: vec![("mix".to_string(), 0.5), ("decay".to_string(), 0.8)],
+                bypass: false,
+            }],
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let decoded: ChainConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.version, "1.0");
+        assert_eq!(decoded.name, "test-preset");
+        assert_eq!(decoded.plugins.len(), 1);
+        assert_eq!(decoded.plugins[0].uri, "http://example.org/reverb");
+        assert_eq!(decoded.plugins[0].parameters.len(), 2);
+    }
+}
