@@ -67,6 +67,11 @@ pub struct PluginChain {
     available_plugins: Vec<PluginInfo>,
     features: Arc<livi::Features>,
     bypass: bool,
+    buffer_size: usize,
+    buf_in_left: Vec<f32>,
+    buf_in_right: Vec<f32>,
+    buf_out_left: Vec<f32>,
+    buf_out_right: Vec<f32>,
 }
 
 unsafe impl Send for PluginChain {}
@@ -84,7 +89,22 @@ impl PluginChain {
             available_plugins,
             features,
             bypass: false,
+            buffer_size: 1024,
+            buf_in_left: vec![0.0f32; 1024],
+            buf_in_right: vec![0.0f32; 1024],
+            buf_out_left: vec![0.0f32; 1024],
+            buf_out_right: vec![0.0f32; 1024],
         })
+    }
+
+    fn ensure_buffer_size(&mut self, nframes: usize) {
+        if nframes > self.buffer_size {
+            self.buffer_size = nframes;
+            self.buf_in_left.resize(nframes, 0.0);
+            self.buf_in_right.resize(nframes, 0.0);
+            self.buf_out_left.resize(nframes, 0.0);
+            self.buf_out_right.resize(nframes, 0.0);
+        }
     }
 
     pub fn bypass(&self) -> bool {
@@ -473,6 +493,8 @@ impl PluginChain {
             return;
         }
 
+        self.ensure_buffer_size(nframes);
+
         for plugin in &mut self.plugins {
             if plugin.bypass {
                 continue;
@@ -481,18 +503,17 @@ impl PluginChain {
             let audio_in_count = port_counts.audio_inputs;
             let audio_out_count = port_counts.audio_outputs;
 
-            let in_buf: Vec<f32> = output.to_vec();
-
             if audio_in_count == 2 && audio_out_count == 2 {
-                let left: Vec<f32> = in_buf.iter().step_by(2).copied().collect();
-                let right: Vec<f32> = in_buf.iter().skip(1).step_by(2).copied().collect();
-
-                let mut out_left = vec![0.0f32; nframes];
-                let mut out_right = vec![0.0f32; nframes];
+                for i in 0..nframes {
+                    self.buf_in_left[i] = output[i * 2];
+                    self.buf_in_right[i] = output[i * 2 + 1];
+                }
 
                 let ports = PortConnections {
-                    audio_inputs: [left.as_slice(), right.as_slice()].into_iter(),
-                    audio_outputs: [out_left.as_mut_slice(), out_right.as_mut_slice()].into_iter(),
+                    audio_inputs: [self.buf_in_left.as_slice(), self.buf_in_right.as_slice()]
+                        .into_iter(),
+                    audio_outputs: [self.buf_out_left.as_mut_slice(), self.buf_out_right.as_mut_slice()]
+                        .into_iter(),
                     atom_sequence_inputs: plugin.atom_sequence_inputs.iter(),
                     atom_sequence_outputs: plugin.atom_sequence_outputs.iter_mut(),
                     cv_inputs: std::iter::empty(),
@@ -505,19 +526,18 @@ impl PluginChain {
                     });
                 }
 
-                for (i, (l, r)) in out_left.iter().zip(out_right.iter()).enumerate() {
-                    if i * 2 < output.len() {
-                        output[i * 2] = *l;
-                        output[i * 2 + 1] = *r;
-                    }
+                for i in 0..nframes {
+                    output[i * 2] = self.buf_out_left[i];
+                    output[i * 2 + 1] = self.buf_out_right[i];
                 }
             } else if audio_in_count == 1 && audio_out_count == 1 {
-                let mono: Vec<f32> = in_buf.iter().step_by(2).copied().collect();
-                let mut out_mono = vec![0.0f32; nframes];
+                for i in 0..nframes {
+                    self.buf_in_left[i] = output[i * 2];
+                }
 
                 let ports = PortConnections {
-                    audio_inputs: std::iter::once(mono.as_slice()),
-                    audio_outputs: std::iter::once(out_mono.as_mut_slice()),
+                    audio_inputs: std::iter::once(self.buf_in_left.as_slice()),
+                    audio_outputs: std::iter::once(self.buf_out_left.as_mut_slice()),
                     atom_sequence_inputs: plugin.atom_sequence_inputs.iter(),
                     atom_sequence_outputs: plugin.atom_sequence_outputs.iter_mut(),
                     cv_inputs: std::iter::empty(),
@@ -530,74 +550,95 @@ impl PluginChain {
                     });
                 }
 
-                for (i, s) in out_mono.iter().enumerate() {
-                    if i * 2 < output.len() {
-                        output[i * 2] = *s;
-                        output[i * 2 + 1] = *s;
-                    }
+                for i in 0..nframes {
+                    output[i * 2] = self.buf_out_left[i];
+                    output[i * 2 + 1] = self.buf_out_left[i];
                 }
             } else if audio_in_count == 0 && audio_out_count >= 1 {
-                let mut outputs: Vec<Vec<f32>> = (0..audio_out_count)
-                    .map(|_| vec![0.0f32; nframes])
-                    .collect();
-
-                let ports = PortConnections {
-                    audio_inputs: std::iter::empty(),
-                    audio_outputs: outputs.iter_mut().map(|o| o.as_mut_slice()),
-                    atom_sequence_inputs: plugin.atom_sequence_inputs.iter(),
-                    atom_sequence_outputs: plugin.atom_sequence_outputs.iter_mut(),
-                    cv_inputs: std::iter::empty(),
-                    cv_outputs: std::iter::empty(),
-                };
-
-                unsafe {
-                    plugin.instance.run(nframes, ports).unwrap_or_else(|e| {
-                        log::error!("Plugin processing error: {:?}", e);
-                    });
-                }
-
-                for (i, samples) in outputs.iter().enumerate() {
-                    for (j, s) in samples.iter().enumerate() {
-                        if j * 2 + i < output.len() {
-                            if i == 0 {
-                                output[j * 2] = *s;
-                            } else if i == 1 {
-                                output[j * 2 + 1] = *s;
-                            }
-                        }
-                    }
-                }
-
                 if audio_out_count == 1 {
-                    for j in 0..nframes {
-                        if j * 2 + 1 < output.len() {
-                            output[j * 2 + 1] = output[j * 2];
-                        }
+                    self.buf_out_left.fill(0.0);
+
+                    let ports = PortConnections {
+                        audio_inputs: std::iter::empty(),
+                        audio_outputs: std::iter::once(self.buf_out_left.as_mut_slice()),
+                        atom_sequence_inputs: plugin.atom_sequence_inputs.iter(),
+                        atom_sequence_outputs: plugin.atom_sequence_outputs.iter_mut(),
+                        cv_inputs: std::iter::empty(),
+                        cv_outputs: std::iter::empty(),
+                    };
+
+                    unsafe {
+                        plugin.instance.run(nframes, ports).unwrap_or_else(|e| {
+                            log::error!("Plugin processing error: {:?}", e);
+                        });
+                    }
+
+                    for i in 0..nframes {
+                        output[i * 2] = self.buf_out_left[i];
+                        output[i * 2 + 1] = self.buf_out_left[i];
+                    }
+                } else {
+                    self.buf_out_left.fill(0.0);
+                    self.buf_out_right.fill(0.0);
+
+                    let ports = PortConnections {
+                        audio_inputs: std::iter::empty(),
+                        audio_outputs: [self.buf_out_left.as_mut_slice(), self.buf_out_right.as_mut_slice()]
+                            .into_iter(),
+                        atom_sequence_inputs: plugin.atom_sequence_inputs.iter(),
+                        atom_sequence_outputs: plugin.atom_sequence_outputs.iter_mut(),
+                        cv_inputs: std::iter::empty(),
+                        cv_outputs: std::iter::empty(),
+                    };
+
+                    unsafe {
+                        plugin.instance.run(nframes, ports).unwrap_or_else(|e| {
+                            log::error!("Plugin processing error: {:?}", e);
+                        });
+                    }
+
+                    for i in 0..nframes {
+                        output[i * 2] = self.buf_out_left[i];
+                        output[i * 2 + 1] = self.buf_out_right[i];
                     }
                 }
             } else if audio_in_count >= 1 && audio_out_count == 0 {
-                let inputs: Vec<Vec<f32>> = if audio_in_count == 2 {
-                    vec![
-                        in_buf.iter().step_by(2).copied().collect(),
-                        in_buf.iter().skip(1).step_by(2).copied().collect(),
-                    ]
+                for i in 0..nframes {
+                    self.buf_in_left[i] = output[i * 2];
+                    self.buf_in_right[i] = output[i * 2 + 1];
+                }
+
+                if audio_in_count == 2 {
+                    let ports = PortConnections {
+                        audio_inputs: [self.buf_in_left.as_slice(), self.buf_in_right.as_slice()]
+                            .into_iter(),
+                        audio_outputs: std::iter::empty(),
+                        atom_sequence_inputs: plugin.atom_sequence_inputs.iter(),
+                        atom_sequence_outputs: plugin.atom_sequence_outputs.iter_mut(),
+                        cv_inputs: std::iter::empty(),
+                        cv_outputs: std::iter::empty(),
+                    };
+
+                    unsafe {
+                        plugin.instance.run(nframes, ports).unwrap_or_else(|e| {
+                            log::error!("Plugin processing error: {:?}", e);
+                        });
+                    }
                 } else {
-                    vec![in_buf.iter().step_by(2).copied().collect()]
-                };
+                    let ports = PortConnections {
+                        audio_inputs: std::iter::once(self.buf_in_left.as_slice()),
+                        audio_outputs: std::iter::empty(),
+                        atom_sequence_inputs: plugin.atom_sequence_inputs.iter(),
+                        atom_sequence_outputs: plugin.atom_sequence_outputs.iter_mut(),
+                        cv_inputs: std::iter::empty(),
+                        cv_outputs: std::iter::empty(),
+                    };
 
-                let ports = PortConnections {
-                    audio_inputs: inputs.iter().map(|i| i.as_slice()),
-                    audio_outputs: std::iter::empty(),
-                    atom_sequence_inputs: plugin.atom_sequence_inputs.iter(),
-                    atom_sequence_outputs: plugin.atom_sequence_outputs.iter_mut(),
-                    cv_inputs: std::iter::empty(),
-                    cv_outputs: std::iter::empty(),
-                };
-
-                unsafe {
-                    plugin.instance.run(nframes, ports).unwrap_or_else(|e| {
-                        log::error!("Plugin processing error: {:?}", e);
-                    });
+                    unsafe {
+                        plugin.instance.run(nframes, ports).unwrap_or_else(|e| {
+                            log::error!("Plugin processing error: {:?}", e);
+                        });
+                    }
                 }
             }
         }

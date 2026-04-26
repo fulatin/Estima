@@ -419,7 +419,7 @@ impl App {
                     Err(e) => println!("✗ Failed: {}", e),
                 }
             }
-            Command::ClearChain => {
+            Command::ClearChain { .. } => {
                 let mut chain = self.plugin_chain.lock().unwrap();
                 chain.clear();
                 self.last_loaded_id = None;
@@ -446,7 +446,7 @@ impl App {
                     println!("✓ Bypass OFF");
                 }
             }
-            Command::ShowStatus => {
+            Command::ShowStatus { .. } => {
                 let chain = self.plugin_chain.lock().unwrap();
                 let bypass_status = if chain.bypass() { " [BYPASS]" } else { "" };
                 let plugins = chain.get_active_plugins();
