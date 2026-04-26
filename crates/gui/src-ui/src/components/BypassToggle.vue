@@ -1,5 +1,5 @@
 <template>
-  <div class="fixed bottom-4 right-4">
+  <div class="fixed bottom-4 left-4">
     <button 
       @click="toggleBypass"
       :class="[
