@@ -162,34 +162,43 @@ pub fn parse_ai_response(response: &str) -> Result<CommandList> {
         .trim_end_matches("```")
         .trim();
 
-    let json_str = if let Some(start) = trimmed.find("{") {
-        let from_start = &trimmed[start..];
-        let mut brace_count = 0;
-        let mut end = from_start.len();
-        for (i, c) in from_start.char_indices() {
-            match c {
-                '{' => brace_count += 1,
-                '}' => {
-                    brace_count -= 1;
-                    if brace_count == 0 {
-                        end = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        &from_start[..end]
-    } else {
-        trimmed
-    };
-
-    let cmd: CommandList = serde_json::from_str(json_str)?;
-    log::debug!("Parsed {} command(s)", cmd.commands.len());
-    for (i, c) in cmd.commands.iter().enumerate() {
-        log::debug!("Command {}: {:?}", i, c);
+    let json_start = trimmed.find("{");
+    if json_start.is_none() {
+        log::info!("No JSON found in response, returning empty command list");
+        return Ok(CommandList { commands: vec![] });
     }
-    Ok(cmd)
+
+    let from_start = &trimmed[json_start.unwrap()..];
+    let mut brace_count = 0;
+    let mut end = from_start.len();
+    for (i, c) in from_start.char_indices() {
+        match c {
+            '{' => brace_count += 1,
+            '}' => {
+                brace_count -= 1;
+                if brace_count == 0 {
+                    end = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let json_str = &from_start[..end];
+
+    match serde_json::from_str::<CommandList>(json_str) {
+        Ok(cmd) => {
+            log::debug!("Parsed {} command(s)", cmd.commands.len());
+            for (i, c) in cmd.commands.iter().enumerate() {
+                log::debug!("Command {}: {:?}", i, c);
+            }
+            Ok(cmd)
+        }
+        Err(e) => {
+            log::warn!("Failed to parse JSON, returning empty command list: {}", e);
+            Ok(CommandList { commands: vec![] })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -322,9 +331,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_invalid_json() {
+    fn parse_invalid_json_returns_empty() {
         let input = "not json at all";
-        assert!(parse_ai_response(input).is_err());
+        let result = parse_ai_response(input).unwrap();
+        assert_eq!(result.commands.len(), 0);
+    }
+
+    #[test]
+    fn parse_text_with_no_json() {
+        let input = "✅ 已经确认过了！目前的音色链是纯正的 Emo Core，完全没有哇音效果器！";
+        let result = parse_ai_response(input).unwrap();
+        assert_eq!(result.commands.len(), 0);
     }
 
     #[test]
