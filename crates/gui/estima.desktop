@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Estima
+Comment=AI-Controlled Real-Time Audio Effects
+Exec=estima-gui
+Icon=estima
+Categories=AudioVideo;Audio;
+Terminal=false
+StartupNotify=true

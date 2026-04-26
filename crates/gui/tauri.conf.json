@@ -27,9 +27,14 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.png"],
+    "shortDescription": "AI-Controlled Real-Time Audio Effects",
+    "longDescription": "Estima is an AI-powered audio effects processor that allows you to control your audio chain using natural language.",
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0"]
+        "depends": ["libwebkit2gtk-4.1-0", "libjack-jackd2-0"]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
       }
     }
   }

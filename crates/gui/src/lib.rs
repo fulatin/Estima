@@ -14,6 +14,7 @@ use estima_core::control::{
 use estima_core::memory::{
     Conversation, FunctionCall, MemoryStorage, MessageRole as MemoryRole, ToolCall,
 };
+use estima_core::{AIConfig, AppConfig};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -66,6 +67,7 @@ pub struct AudioState {
 pub struct AppState {
     pub memory_storage: MemoryStorage,
     pub conversation: Arc<Mutex<Conversation>>,
+    pub config: Arc<Mutex<AppConfig>>,
 }
 
 fn execute_tool(tool_name: &str, arguments: &str, chain: &PluginChain) -> Result<String> {
@@ -400,6 +402,47 @@ fn clear_history(state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_config(state: State<AppState>) -> Result<AppConfig, String> {
+    let config = state.config.lock().map_err(|e| e.to_string())?;
+    Ok(config.clone())
+}
+
+#[tauri::command]
+fn save_config(state: State<AppState>, config: AppConfig) -> Result<(), String> {
+    config.save().map_err(|e| e.to_string())?;
+    let mut current = state.config.lock().map_err(|e| e.to_string())?;
+    *current = config;
+    Ok(())
+}
+
+#[tauri::command]
+async fn test_ai_connection(config: AIConfig) -> Result<String, String> {
+    let provider: Box<dyn AIProvider> = match config.provider.as_str() {
+        "siliconflow" => Box::new(OpenAICompatibleProvider::new(
+            AIProviderType::SiliconFlow,
+            &config.api_key,
+            config.model.as_deref(),
+        )),
+        "deepseek" => Box::new(OpenAICompatibleProvider::new(
+            AIProviderType::DeepSeek,
+            &config.api_key,
+            config.model.as_deref(),
+        )),
+        "openai" => Box::new(OpenAICompatibleProvider::new(
+            AIProviderType::OpenAI,
+            &config.api_key,
+            config.model.as_deref(),
+        )),
+        _ => return Err(format!("Unknown provider: {}", config.provider)),
+    };
+
+    match provider.chat("Respond with just 'OK'", Some("You are a test assistant.")).await {
+        Ok(response) => Ok(format!("Connection successful: {}", response.chars().take(50).collect::<String>())),
+        Err(e) => Err(format!("Connection failed: {}", e)),
+    }
+}
+
+#[tauri::command]
 async fn ai_chat(
     message: String,
     audio_state: State<'_, AudioState>,
@@ -407,36 +450,61 @@ async fn ai_chat(
 ) -> Result<CommandList, String> {
     log::debug!("ai_chat called with message: {}", message);
     use std::env;
-    let ai_provider: Box<dyn AIProvider> = if let Ok(api_key) = env::var("SILICONFLOW_API_KEY") {
-        let model = env::var("SILICONFLOW_MODEL").ok();
-        log::debug!("Using SiliconFlow provider, model: {:?}", model);
-        Box::new(OpenAICompatibleProvider::new(
-            AIProviderType::SiliconFlow,
-            &api_key,
-            model.as_deref(),
-        ))
-    } else if let Ok(api_key) = env::var("DEEPSEEK_API_KEY") {
-        let model = env::var("DEEPSEEK_MODEL")
-            .or_else(|_| env::var("AI_MODEL"))
-            .or_else(|_| env::var("OPENAI_MODEL"))
-            .ok();
-        log::debug!("Using DeepSeek provider, model: {:?}", model);
-        Box::new(OpenAICompatibleProvider::new(
-            AIProviderType::DeepSeek,
-            &api_key,
-            model.as_deref(),
-        ))
-    } else if let Ok(api_key) = env::var("OPENAI_API_KEY") {
-        let model = env::var("OPENAI_MODEL").ok();
-        log::debug!("Using OpenAI provider, model: {:?}", model);
-        Box::new(OpenAICompatibleProvider::new(
-            AIProviderType::OpenAI,
-            &api_key,
-            model.as_deref(),
-        ))
-    } else {
-        log::error!("No AI API key configured");
-        return Err("No AI API key configured. Set SILICONFLOW_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY".to_string());
+
+    let ai_provider: Box<dyn AIProvider> = {
+        let config = app_state.config.lock().map_err(|e| e.to_string())?;
+        
+        if config.is_configured() {
+            log::debug!("Using config file provider: {}", config.ai.provider);
+            match config.ai.provider.as_str() {
+                "siliconflow" => Box::new(OpenAICompatibleProvider::new(
+                    AIProviderType::SiliconFlow,
+                    &config.ai.api_key,
+                    config.ai.model.as_deref(),
+                )),
+                "deepseek" => Box::new(OpenAICompatibleProvider::new(
+                    AIProviderType::DeepSeek,
+                    &config.ai.api_key,
+                    config.ai.model.as_deref(),
+                )),
+                "openai" => Box::new(OpenAICompatibleProvider::new(
+                    AIProviderType::OpenAI,
+                    &config.ai.api_key,
+                    config.ai.model.as_deref(),
+                )),
+                _ => return Err(format!("Unknown provider: {}", config.ai.provider)),
+            }
+        } else if let Ok(api_key) = env::var("SILICONFLOW_API_KEY") {
+            let model = env::var("SILICONFLOW_MODEL").ok();
+            log::debug!("Using SiliconFlow provider from env, model: {:?}", model);
+            Box::new(OpenAICompatibleProvider::new(
+                AIProviderType::SiliconFlow,
+                &api_key,
+                model.as_deref(),
+            ))
+        } else if let Ok(api_key) = env::var("DEEPSEEK_API_KEY") {
+            let model = env::var("DEEPSEEK_MODEL")
+                .or_else(|_| env::var("AI_MODEL"))
+                .or_else(|_| env::var("OPENAI_MODEL"))
+                .ok();
+            log::debug!("Using DeepSeek provider from env, model: {:?}", model);
+            Box::new(OpenAICompatibleProvider::new(
+                AIProviderType::DeepSeek,
+                &api_key,
+                model.as_deref(),
+            ))
+        } else if let Ok(api_key) = env::var("OPENAI_API_KEY") {
+            let model = env::var("OPENAI_MODEL").ok();
+            log::debug!("Using OpenAI provider from env, model: {:?}", model);
+            Box::new(OpenAICompatibleProvider::new(
+                AIProviderType::OpenAI,
+                &api_key,
+                model.as_deref(),
+            ))
+        } else {
+            log::error!("No AI API key configured");
+            return Err("No AI API key configured. Configure in Settings or set environment variable.".to_string());
+        }
     };
 
     {
@@ -772,6 +840,10 @@ pub fn run() {
         Err(_) => Arc::new(Mutex::new(Conversation::new())),
     };
 
+    let config = Arc::new(Mutex::new(
+        AppConfig::load().unwrap_or_default()
+    ));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AudioState {
@@ -783,6 +855,7 @@ pub fn run() {
         .manage(AppState {
             memory_storage,
             conversation,
+            config,
         })
         .invoke_handler(tauri::generate_handler![
             list_plugins,
@@ -801,6 +874,9 @@ pub fn run() {
             ai_chat,
             get_history,
             clear_history,
+            get_config,
+            save_config,
+            test_ai_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
