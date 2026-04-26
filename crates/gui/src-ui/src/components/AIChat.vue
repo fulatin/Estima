@@ -35,6 +35,14 @@
       >
         Send
       </button>
+      <button 
+        @click="clearHistory"
+        :disabled="thinking"
+        class="px-4 py-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 rounded"
+        title="Clear conversation history"
+      >
+        Clear
+      </button>
     </div>
     
     <div v-if="lastCommands.length > 0" class="mt-4">
@@ -124,5 +132,11 @@ async function executeCommand(cmd: any) {
   } else if (cmd.ClearChain) {
     // TODO: implement clear chain
   }
+}
+
+async function clearHistory() {
+  messages.value = []
+  lastCommands.value = []
+  await store.clearHistory()
 }
 </script>

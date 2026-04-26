@@ -121,6 +121,10 @@ export const useAudioStore = defineStore('audio', () => {
     return await invoke<CommandList>('ai_chat', { message })
   }
 
+  async function clearHistory() {
+    await invoke('clear_history')
+  }
+
   return {
     plugins,
     bypass,
@@ -142,5 +146,6 @@ export const useAudioStore = defineStore('audio', () => {
     loadPreset,
     listPresets,
     aiChat,
+    clearHistory,
   }
 })
