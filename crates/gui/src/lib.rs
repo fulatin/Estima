@@ -18,6 +18,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
+#[derive(Debug, Clone)]
+pub struct AIResponse {
+    pub content: String,
+    pub reasoning_content: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PluginInfo {
     pub id: String,
@@ -446,18 +452,25 @@ async fn ai_chat(
         process_without_tools(&ai_provider, &message, &audio_state, &app_state).await?
     };
 
-    log::debug!("AI response received: {}", response.chars().take(200).collect::<String>());
+    log::debug!("AI response received: {}", response.content.chars().take(200).collect::<String>());
 
     {
         let mut conversation = app_state.conversation.lock().map_err(|e| e.to_string())?;
-        conversation.add_message(MemoryRole::Assistant, &response);
+        conversation.add_message_with_meta(
+            MemoryRole::Assistant,
+            &response.content,
+            None,
+            None,
+            None,
+            response.reasoning_content.clone(),
+        );
         app_state
             .memory_storage
             .save(&conversation)
             .map_err(|e| e.to_string())?;
     }
 
-    let commands = parse_ai_response(&response).map_err(|e| {
+    let commands = parse_ai_response(&response.content).map_err(|e| {
         log::error!("Failed to parse AI response: {}", e);
         e.to_string()
     })?;
@@ -470,7 +483,7 @@ async fn process_with_tools(
     _message: &str,
     audio_state: &State<'_, AudioState>,
     app_state: &State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<AIResponse, String> {
     log::debug!("process_with_tools: starting");
     const MAX_TOOL_ITERATIONS: usize = 5;
 
@@ -605,7 +618,10 @@ async fn process_with_tools(
 
         if let Some(content) = response.content {
             log::debug!("Got final content response");
-            return Ok(content);
+            return Ok(AIResponse {
+                content,
+                reasoning_content: response.reasoning_content.clone(),
+            });
         }
 
         log::warn!("Empty response from AI");
@@ -621,7 +637,7 @@ async fn process_without_tools(
     message: &str,
     audio_state: &State<'_, AudioState>,
     app_state: &State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<AIResponse, String> {
     let (plugins_info, active_plugins, bypass) = {
         let chain = audio_state.chain.lock().map_err(|e| e.to_string())?;
         let plugins_info: Vec<String> = chain
@@ -711,7 +727,10 @@ async fn process_without_tools(
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(response)
+    Ok(AIResponse {
+        content: response,
+        reasoning_content: None,
+    })
 }
 
 pub fn run() {
