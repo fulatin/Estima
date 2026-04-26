@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 interface PluginInfo {
   id: string
@@ -8,7 +9,7 @@ interface PluginInfo {
   name: string
   plugin_type: string
   bypass: boolean
-  hasUI: boolean
+  hasUi: boolean
 }
 
 interface ParameterInfo {
@@ -18,16 +19,23 @@ interface ParameterInfo {
   min: number
   max: number
   current: number
+  portIndex: number
 }
 
 interface ChainStatus {
   plugins: PluginInfo[]
   bypass: boolean
-  last_loaded_id: string | null
+  lastLoadedId: string | null
 }
 
 interface CommandList {
   commands: Command[]
+}
+
+interface ParameterChangeEvent {
+  pluginId: string
+  portIndex: number
+  value: number
 }
 
 type Command = 
@@ -50,7 +58,7 @@ export const useAudioStore = defineStore('audio', () => {
     const status: ChainStatus = await invoke('get_chain_status')
     plugins.value = status.plugins
     bypass.value = status.bypass
-    lastLoadedId.value = status.last_loaded_id
+    lastLoadedId.value = status.lastLoadedId
   }
 
   async function listPlugins(filter?: string) {
@@ -126,6 +134,33 @@ export const useAudioStore = defineStore('audio', () => {
     await invoke('clear_history')
   }
 
+  // Listen for parameter changes from plugin UI
+  async function setupParameterListener() {
+    console.log('[audioStore] Setting up parameter listener...')
+    const unlisten = await listen<ParameterChangeEvent>('plugin-parameter-changed', (event) => {
+      const { pluginId, portIndex, value } = event.payload
+      console.log('[audioStore] Received parameter change:', { pluginId, portIndex, value })
+      
+      // Update local parameters if this is the selected plugin
+      if (selectedPlugin.value && selectedPlugin.value.id === pluginId) {
+        // Create new array to force reactivity
+        const idx = parameters.value.findIndex(p => p.portIndex === portIndex)
+        if (idx !== -1) {
+          const newParams = [...parameters.value]
+          newParams[idx] = { ...newParams[idx], current: value }
+          parameters.value = newParams
+          console.log('[audioStore] Updated parameter:', newParams[idx].name, 'to', value)
+        } else {
+          console.log('[audioStore] No parameter found with portIndex:', portIndex, 'available:', parameters.value.map(p => ({ name: p.name, portIndex: p.portIndex })))
+        }
+      } else {
+        console.log('[audioStore] Plugin not selected:', selectedPlugin.value?.id, 'vs', pluginId)
+      }
+    })
+    console.log('[audioStore] Parameter listener registered, unlisten:', typeof unlisten)
+    return unlisten
+  }
+
   return {
     plugins,
     bypass,
@@ -148,5 +183,6 @@ export const useAudioStore = defineStore('audio', () => {
     listPresets,
     aiChat,
     clearHistory,
+    setupParameterListener,
   }
 })

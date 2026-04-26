@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[cfg(feature = "plugin-ui")]
+use super::PluginUIInfo;
+
 #[derive(Debug, Clone)]
 pub struct PluginInfo {
     pub uri: String,
@@ -21,6 +24,8 @@ pub struct ParameterInfo {
     pub default: f32,
     pub min: f32,
     pub max: f32,
+    #[serde(default)]
+    pub port_index: u32,
 }
 
 impl std::fmt::Display for ParameterInfo {
@@ -188,13 +193,15 @@ impl PluginChain {
     fn extract_parameters(plugin: &livi::Plugin) -> Vec<ParameterInfo> {
         plugin
             .ports()
-            .filter(|p| matches!(p.port_type, PortType::ControlInput))
-            .map(|p| ParameterInfo {
+            .enumerate()
+            .filter(|(_, p)| matches!(p.port_type, PortType::ControlInput))
+            .map(|(idx, p)| ParameterInfo {
                 name: p.name.clone(),
                 symbol: p.symbol.clone(),
                 default: p.default_value,
                 min: p.min_value.unwrap_or(0.0),
                 max: p.max_value.unwrap_or(1.0),
+                port_index: idx as u32,
             })
             .collect()
     }
@@ -409,6 +416,113 @@ impl PluginChain {
 
     pub fn get_plugin_by_id(&self, id: &str) -> Option<&ActivePlugin> {
         self.plugins.iter().find(|p| p.id == id)
+    }
+
+    pub fn get_plugin_mut(&mut self, id: &str) -> Option<&mut ActivePlugin> {
+        self.plugins.iter_mut().find(|p| p.id == id)
+    }
+
+    #[cfg(feature = "plugin-ui")]
+    pub fn set_parameter_value(&mut self, plugin_id: &str, port_index: u32, value: f32) -> bool {
+        if let Some(plugin) = self.plugins.iter_mut().find(|p| p.id == plugin_id) {
+            use livi::PortIndex;
+            plugin.instance.set_control_input(PortIndex(port_index as usize), value);
+            
+            // Find parameter by port_index and update parameter_values
+            if let Some((param_idx, param)) = plugin.parameters.iter().enumerate()
+                .find(|(_, p)| p.port_index == port_index) 
+            {
+                if param_idx < plugin.parameter_values.len() {
+                    plugin.parameter_values[param_idx].1 = value;
+                    log::debug!("Updated parameter '{}' (port {}) to {}", param.symbol, port_index, value);
+                }
+            }
+            
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(feature = "plugin-ui")]
+    pub fn get_plugin_ui_info(&self, uri: &str) -> Option<PluginUIInfo> {
+        fn uri_to_path(uri: &str) -> String {
+            if let Some(stripped) = uri.strip_prefix("file://") {
+                urlencoding::decode(stripped)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|_| stripped.to_string())
+            } else {
+                uri.to_string()
+            }
+        }
+
+        let plugin = self.world.plugin_by_uri(uri)?;
+        let raw_plugin = plugin.raw();
+        let uis = raw_plugin.uis()?;
+        
+        let plugin_uri = uri.to_string();
+        
+        for ui in uis.iter() {
+            let classes = ui.classes();
+            let ui_uri = ui.uri().as_str().unwrap_or("").to_string();
+            
+            let bundle_path = ui.bundle_uri()
+                .and_then(|n| n.as_str().map(|s| uri_to_path(s)))
+                .unwrap_or_default();
+            
+            let binary_path = ui.binary_uri()
+                .and_then(|n| n.as_str().map(|s| uri_to_path(s)))
+                .unwrap_or_default();
+            
+            for class in classes.iter() {
+                let class_str = class.as_str().unwrap_or("");
+                
+                if class_str.contains("X11UI") {
+                    return Some(PluginUIInfo {
+                        plugin_uri,
+                        ui_uri,
+                        ui_type: "http://lv2plug.in/ns/extensions/ui#X11UI".to_string(),
+                        bundle_path,
+                        binary_path,
+                    });
+                }
+                
+                if class_str.contains("GtkUI") || class_str.contains("Gtk3UI") {
+                    return Some(PluginUIInfo {
+                        plugin_uri,
+                        ui_uri,
+                        ui_type: "http://lv2plug.in/ns/extensions/ui#Gtk3UI".to_string(),
+                        bundle_path,
+                        binary_path,
+                    });
+                }
+            }
+        }
+        
+        None
+    }
+
+    #[cfg(feature = "plugin-ui")]
+    pub fn get_plugin_ui_info_by_id(&self, plugin_id: &str) -> Result<PluginUIInfo> {
+        let plugin = self.get_plugin_by_id(plugin_id)
+            .ok_or_else(|| anyhow!("Plugin not found: {}", plugin_id))?;
+        
+        self.get_plugin_ui_info(&plugin.info.uri)
+            .ok_or_else(|| anyhow!("No UI available for plugin {}", plugin_id))
+    }
+
+    #[cfg(feature = "plugin-ui")]
+    pub fn get_plugin_uri_by_id(&self, plugin_id: &str) -> Result<String> {
+        let plugin = self.get_plugin_by_id(plugin_id)
+            .ok_or_else(|| anyhow!("Plugin not found: {}", plugin_id))?;
+        Ok(plugin.info.uri.clone())
+    }
+
+    #[cfg(feature = "plugin-ui")]
+    pub fn get_plugin_name_by_id(&self, plugin_id: &str) -> Result<String> {
+        let plugin = self.get_plugin_by_id(plugin_id)
+            .ok_or_else(|| anyhow!("Plugin not found: {}", plugin_id))?;
+        Ok(plugin.info.name.clone())
     }
 
     pub fn export_config(&self, name: &str) -> ChainConfig {

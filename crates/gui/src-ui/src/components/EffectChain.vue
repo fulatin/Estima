@@ -37,15 +37,14 @@
             <div :class="['font-medium text-sm', plugin.bypass ? 'line-through' : 'text-white']">
               {{ plugin.name }}
             </div>
-            <div class="text-xs text-[#666]">{{ plugin.plugin_type }}</div>
+            <div class="text-xs text-[#666]">{{ plugin.plugin_type }} | hasUi: {{ plugin.hasUi }}</div>
           </div>
         </div>
         <div class="flex gap-1">
           <button 
-            v-if="plugin.hasUI"
+            v-if="plugin.hasUi"
             @click="showPluginUI(plugin)"
             class="px-2 py-1 text-xs border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors"
-            title="Plugin has native UI (coming soon)"
           >
             UI
           </button>
@@ -81,6 +80,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useAudioStore } from '../stores/audioStore'
+import { invoke } from '@tauri-apps/api/core'
 
 const store = useAudioStore()
 const plugins = computed(() => store.plugins)
@@ -109,7 +109,12 @@ async function movePlugin(id: string, direction: number) {
   }
 }
 
-function showPluginUI(plugin: any) {
-  alert(`${plugin.name} has a native UI.\n\nThis feature is coming soon!`)
+async function showPluginUI(plugin: any) {
+  try {
+    await invoke('open_plugin_ui', { pluginId: plugin.id })
+  } catch (e) {
+    console.error('Failed to open plugin UI:', e)
+    alert(`Failed to open plugin UI: ${e}`)
+  }
 }
 </script>

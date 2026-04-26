@@ -7,7 +7,7 @@ use estima_core::ai::{
         TOOL_LIST_PLUGIN_TYPES, TOOL_SEARCH_PLUGINS, parse_tool_arguments,
     },
 };
-use estima_core::audio::{AudioState as JackAudioState, JackEngine, PluginChain};
+use estima_core::audio::{AudioState as JackAudioState, JackEngine, LV2ExternalUIManager, PluginChain};
 use estima_core::control::{
     CommandList, SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_CONTEXT, parse_ai_response,
 };
@@ -17,7 +17,7 @@ use estima_core::memory::{
 use estima_core::{AIConfig, AppConfig};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{Emitter, Manager, State};
 
 #[derive(Debug, Clone)]
 pub struct AIResponse {
@@ -26,6 +26,7 @@ pub struct AIResponse {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginInfo {
     pub id: String,
     pub uri: String,
@@ -36,6 +37,7 @@ pub struct PluginInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ParameterInfo {
     pub name: String,
     pub symbol: String,
@@ -43,9 +45,11 @@ pub struct ParameterInfo {
     pub min: f32,
     pub max: f32,
     pub current: f32,
+    pub port_index: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ChainStatus {
     pub plugins: Vec<PluginInfo>,
     pub bypass: bool,
@@ -63,6 +67,8 @@ pub struct AudioState {
     pub last_loaded_id: Arc<Mutex<Option<String>>>,
     pub sample_rate: f64,
     pub started: bool,
+    pub ui_manager: Arc<Mutex<Option<LV2ExternalUIManager>>>,
+    pub app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
 
 pub struct AppState {
@@ -172,6 +178,13 @@ fn list_plugins(
             })
             .collect()
     };
+    
+    let ui_count = plugins.iter().filter(|p| p.has_ui).count();
+    log::info!("list_plugins: {} total, {} with UI", plugins.len(), ui_count);
+    if let Some(p) = plugins.iter().find(|p| p.has_ui) {
+        log::info!("First plugin with UI: {} (has_ui={})", p.name, p.has_ui);
+    }
+    
     Ok(plugins)
 }
 
@@ -244,6 +257,7 @@ fn get_plugin_parameters(
             min: p.min,
             max: p.max,
             current: p.default,
+            port_index: p.port_index,
         })
         .collect())
 }
@@ -269,6 +283,7 @@ fn get_active_plugin_parameters(
             min: p.min,
             max: p.max,
             current: *value,
+            port_index: p.port_index,
         })
         .collect())
 }
@@ -316,6 +331,10 @@ fn get_chain_status(state: State<AudioState>) -> Result<ChainStatus, String> {
             has_ui: p.info.has_ui,
         })
         .collect();
+
+    for p in &plugins {
+        log::info!("Active plugin: {} has_ui={}", p.name, p.has_ui);
+    }
 
     Ok(ChainStatus {
         plugins,
@@ -446,6 +465,44 @@ async fn test_ai_connection(config: AIConfig) -> Result<String, String> {
         Ok(response) => Ok(format!("Connection successful: {}", response.chars().take(50).collect::<String>())),
         Err(e) => Err(format!("Connection failed: {}", e)),
     }
+}
+
+#[tauri::command]
+fn open_plugin_ui(plugin_id: String, state: State<AudioState>) -> Result<(), String> {
+    let chain = state.chain.clone();
+    let app_handle = state.app_handle.lock().map_err(|e| e.to_string())?;
+    let app_handle = app_handle.clone().ok_or("App handle not set")?;
+    
+    let mut ui_manager = state.ui_manager.lock().map_err(|e| e.to_string())?;
+    
+    if ui_manager.is_none() {
+        let handle_for_callback = app_handle.clone();
+        let callback = Arc::new(move |plugin_id: &str, port_index: u32, value: f32| {
+            log::info!("Emitting plugin-parameter-changed: plugin={}, port={}, value={}", plugin_id, port_index, value);
+            let _ = handle_for_callback.emit("plugin-parameter-changed", serde_json::json!({
+                "pluginId": plugin_id,
+                "portIndex": port_index,
+                "value": value
+            }));
+        });
+        
+        let manager = LV2ExternalUIManager::new(chain, callback)
+            .map_err(|e| format!("Failed to create UI manager: {}", e))?;
+        *ui_manager = Some(manager);
+    }
+    
+    let manager = ui_manager.as_mut().ok_or("UI manager not initialized")?;
+    manager.open_ui(&plugin_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn close_plugin_ui(plugin_id: String, state: State<AudioState>) -> Result<(), String> {
+    let mut ui_manager = state.ui_manager.lock().map_err(|e| e.to_string())?;
+    
+    if let Some(manager) = ui_manager.as_mut() {
+        manager.close_ui(&plugin_id).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -857,6 +914,15 @@ pub fn run() {
             last_loaded_id: Arc::new(Mutex::new(None)),
             sample_rate,
             started: true,
+            ui_manager: Arc::new(Mutex::new(None)),
+            app_handle: Arc::new(Mutex::new(None)),
+        })
+        .setup(|app| {
+            // Get the app handle and store it in AudioState
+            let handle = app.handle().clone();
+            let state = app.state::<AudioState>();
+            *state.app_handle.lock().unwrap() = Some(handle);
+            Ok(())
         })
         .manage(AppState {
             memory_storage,
@@ -883,6 +949,8 @@ pub fn run() {
             get_config,
             save_config,
             test_ai_connection,
+            open_plugin_ui,
+            close_plugin_ui,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

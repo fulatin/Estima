@@ -17,9 +17,19 @@ uuid = { workspace = true }
 crossbeam = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
+urlencoding = "2.1"
+lv2-sys = "2.0"
+libloading = { version = "0.8", optional = true }
+gtk = { version = "0.18", optional = true }
+glib = { version = "0.18", optional = true }
+x11 = { version = "2.21", features = ["xlib"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+default = []
+plugin-ui = ["gtk", "glib", "x11", "libloading"]
 
 [lib]
 name = "estima_core"

@@ -9,7 +9,7 @@ name = "estima-gui"
 path = "src-tauri/src/main.rs"
 
 [dependencies]
-estima-core = { path = "../core" }
+estima-core = { path = "../core", features = ["plugin-ui"] }
 tauri = { workspace = true }
 tauri-plugin-shell = { workspace = true }
 log = { workspace = true }
