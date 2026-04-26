@@ -18,11 +18,19 @@ pub enum Command {
     SetBypass {
         bypass: bool,
     },
-    ClearChain,
+    ClearChain {
+        #[serde(default)]
+        #[allow(dead_code)]
+        _dummy: (),
+    },
     ListPlugins {
         filter: Option<String>,
     },
-    ShowStatus,
+    ShowStatus {
+        #[serde(default)]
+        #[allow(dead_code)]
+        _dummy: (),
+    },
     MovePlugin {
         id: String,
         new_position: usize,
@@ -301,5 +309,21 @@ mod tests {
         let input = r#"{"commands":[]}"#;
         let result = parse_ai_response(input).unwrap();
         assert_eq!(result.commands.len(), 0);
+    }
+
+    #[test]
+    fn parse_show_status_with_empty_object() {
+        let input = r#"{"commands": [{"ShowStatus": {}}]}"#;
+        let result = parse_ai_response(input).unwrap();
+        assert_eq!(result.commands.len(), 1);
+        matches!(&result.commands[0], Command::ShowStatus { .. });
+    }
+
+    #[test]
+    fn parse_clear_chain_with_empty_object() {
+        let input = r#"{"commands": [{"ClearChain": {}}]}"#;
+        let result = parse_ai_response(input).unwrap();
+        assert_eq!(result.commands.len(), 1);
+        matches!(&result.commands[0], Command::ClearChain { .. });
     }
 }
