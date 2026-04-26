@@ -11,6 +11,7 @@ pub struct PluginInfo {
     pub uri: String,
     pub name: String,
     pub plugin_type: String,
+    pub has_ui: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,11 +128,13 @@ impl PluginChain {
                 let name = plugin.name();
                 let uri = plugin.uri();
                 let plugin_type = Self::classify_plugin(&name);
+                let has_ui = plugin.raw().uis().is_some();
 
                 PluginInfo {
                     uri,
                     name,
                     plugin_type,
+                    has_ui,
                 }
             })
             .collect();
@@ -280,6 +283,7 @@ impl PluginChain {
                 uri: uri.to_string(),
                 name: uri.split('#').last().unwrap_or(uri).to_string(),
                 plugin_type: "unknown".to_string(),
+                has_ui: false,
             });
 
         let active_plugin = ActivePlugin {

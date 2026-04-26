@@ -8,6 +8,7 @@ interface PluginInfo {
   name: string
   plugin_type: string
   bypass: boolean
+  hasUI: boolean
 }
 
 interface ParameterInfo {

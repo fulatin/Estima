@@ -32,6 +32,7 @@ pub struct PluginInfo {
     pub name: String,
     pub plugin_type: String,
     pub bypass: bool,
+    pub has_ui: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -154,6 +155,7 @@ fn list_plugins(
                 name: p.name.clone(),
                 plugin_type: p.plugin_type.clone(),
                 bypass: false,
+                has_ui: p.has_ui,
             })
             .collect()
     } else {
@@ -166,6 +168,7 @@ fn list_plugins(
                 name: p.name.clone(),
                 plugin_type: p.plugin_type.clone(),
                 bypass: false,
+                has_ui: p.has_ui,
             })
             .collect()
     };
@@ -194,6 +197,7 @@ fn load_plugin(uri: String, state: State<AudioState>) -> Result<PluginInfo, Stri
         name: plugin.info.name.clone(),
         plugin_type: plugin.info.plugin_type.clone(),
         bypass: plugin.bypass,
+        has_ui: plugin.info.has_ui,
     })
 }
 
@@ -309,6 +313,7 @@ fn get_chain_status(state: State<AudioState>) -> Result<ChainStatus, String> {
             name: p.info.name.clone(),
             plugin_type: p.info.plugin_type.clone(),
             bypass: p.bypass,
+            has_ui: p.info.has_ui,
         })
         .collect();
 
@@ -355,6 +360,7 @@ fn load_preset(name: String, state: State<AudioState>) -> Result<ChainStatus, St
             name: p.info.name.clone(),
             plugin_type: p.info.plugin_type.clone(),
             bypass: p.bypass,
+            has_ui: p.info.has_ui,
         })
         .collect();
 

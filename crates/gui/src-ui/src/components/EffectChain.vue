@@ -42,6 +42,14 @@
         </div>
         <div class="flex gap-1">
           <button 
+            v-if="plugin.hasUI"
+            @click="showPluginUI(plugin)"
+            class="px-2 py-1 text-xs border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors"
+            title="Plugin has native UI (coming soon)"
+          >
+            UI
+          </button>
+          <button 
             @click="toggleBypass(plugin.id)"
             :class="[
               'px-2 py-1 text-xs border transition-colors',
@@ -99,5 +107,9 @@ async function movePlugin(id: string, direction: number) {
   } catch (e) {
     console.error('movePlugin error:', e)
   }
+}
+
+function showPluginUI(plugin: any) {
+  alert(`${plugin.name} has a native UI.\n\nThis feature is coming soon!`)
 }
 </script>
