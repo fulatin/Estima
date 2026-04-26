@@ -147,7 +147,6 @@ impl LV2ExternalUIManager {
                     return Err(anyhow!("This plugin UI is not supported (known incompatibility with host embedding)"));
                 }
             }
-            }
             
             let handle = plugin.instance.raw().instance().handle();
             
