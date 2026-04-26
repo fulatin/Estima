@@ -109,6 +109,25 @@ impl Conversation {
         self.updated_at = Utc::now();
     }
 
+    pub fn cleanup_invalid_messages(&mut self) {
+        let before = self.messages.len();
+        self.messages.retain(|m| {
+            if m.role == MessageRole::Assistant
+                && m.content.is_empty()
+                && m.tool_calls.as_ref().is_none_or(|c| c.is_empty())
+                && m.reasoning_content.is_none()
+            {
+                log::warn!("Removing invalid empty assistant message from history");
+                false
+            } else {
+                true
+            }
+        });
+        if self.messages.len() != before {
+            self.updated_at = Utc::now();
+        }
+    }
+
     pub fn to_openai_messages(&self) -> Vec<serde_json::Value> {
         self.messages
             .iter()
@@ -251,5 +270,69 @@ mod tests {
         assert_eq!(json, "\"System\"");
         let role: MessageRole = serde_json::from_str("\"User\"").unwrap();
         assert_eq!(role, MessageRole::User);
+    }
+
+    #[test]
+    fn cleanup_removes_invalid_empty_assistant_messages() {
+        let mut conv = Conversation::new();
+        conv.add_message(MessageRole::User, "hello");
+        conv.add_message_with_meta(
+            MessageRole::Assistant,
+            "",
+            None,
+            None,
+            None,
+            None,
+        );
+        conv.add_message(MessageRole::User, "world");
+
+        assert_eq!(conv.messages.len(), 3);
+        conv.cleanup_invalid_messages();
+        assert_eq!(conv.messages.len(), 2);
+        assert_eq!(conv.messages[0].content, "hello");
+        assert_eq!(conv.messages[1].content, "world");
+    }
+
+    #[test]
+    fn cleanup_keeps_valid_assistant_with_tool_calls() {
+        let mut conv = Conversation::new();
+        conv.add_message(MessageRole::User, "hello");
+        conv.add_message_with_meta(
+            MessageRole::Assistant,
+            "",
+            None,
+            None,
+            Some(vec![ToolCall {
+                id: "1".to_string(),
+                call_type: "function".to_string(),
+                function: FunctionCall {
+                    name: "test".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            }]),
+            None,
+        );
+
+        assert_eq!(conv.messages.len(), 2);
+        conv.cleanup_invalid_messages();
+        assert_eq!(conv.messages.len(), 2);
+    }
+
+    #[test]
+    fn cleanup_keeps_valid_assistant_with_reasoning() {
+        let mut conv = Conversation::new();
+        conv.add_message(MessageRole::User, "hello");
+        conv.add_message_with_meta(
+            MessageRole::Assistant,
+            "",
+            None,
+            None,
+            None,
+            Some("thinking...".to_string()),
+        );
+
+        assert_eq!(conv.messages.len(), 2);
+        conv.cleanup_invalid_messages();
+        assert_eq!(conv.messages.len(), 2);
     }
 }

@@ -164,7 +164,7 @@ impl OpenAICompatibleProvider {
             }),
         );
 
-        if !msg.content.is_empty() {
+        if msg.role == MessageRole::Assistant || !msg.content.is_empty() {
             map.insert("content".to_string(), serde_json::json!(&msg.content));
         }
 
@@ -309,6 +309,8 @@ impl AIProvider for OpenAICompatibleProvider {
         };
 
         log::debug!("[{}] Sending request to {}", self.provider_type.display_name(), self.base_url);
+        log::debug!("[{}] Request messages: {}", self.provider_type.display_name(), 
+            serde_json::to_string(&openai_request.messages).unwrap_or_default());
         
         let url = format!("{}/chat/completions", self.base_url);
         let response = self
@@ -342,15 +344,20 @@ impl AIProvider for OpenAICompatibleProvider {
             ));
         }
 
-        let chat_response: OpenAIChatResponse = response
-            .json()
-            .await
+        let raw_response = response.text().await.map_err(|e| anyhow!("Failed to read response: {}", e))?;
+        log::debug!("[{}] Raw response (first 1000 chars): {}", self.provider_type.display_name(), 
+            raw_response.chars().take(1000).collect::<String>());
+
+        let chat_response: OpenAIChatResponse = serde_json::from_str(&raw_response)
             .map_err(|e| anyhow!("Failed to parse response: {}", e))?;
 
         let choice = chat_response
             .choices
             .first()
             .ok_or_else(|| anyhow!("No response from {}", self.provider_type.display_name()))?;
+
+        log::debug!("[{}] Has reasoning_content: {}", self.provider_type.display_name(), 
+            choice.message.reasoning_content.is_some());
 
         let tool_calls = if !choice.message.tool_calls.is_empty() {
             log::debug!("[{}] Received {} tool call(s)", self.provider_type.display_name(), choice.message.tool_calls.len());

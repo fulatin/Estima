@@ -40,7 +40,10 @@ impl MemoryStorage {
         }
 
         let content = fs::read_to_string(&self.conversation_file)?;
-        let conversation: Conversation = serde_json::from_str(&content)?;
+        let mut conversation: Conversation = serde_json::from_str(&content)?;
+        
+        conversation.cleanup_invalid_messages();
+        
         Ok(conversation)
     }
 

@@ -481,6 +481,18 @@ async fn process_with_tools(
             .messages
             .iter()
             .filter(|m| m.role != MemoryRole::System)
+            .filter(|m| {
+                if m.role == MemoryRole::Assistant 
+                    && m.content.is_empty() 
+                    && m.tool_calls.clone().is_none_or(|c| c.is_empty())
+                    && m.reasoning_content.is_none() 
+                {
+                    log::warn!("Filtering out invalid empty assistant message without reasoning_content or tool_calls");
+                    false
+                } else {
+                    true
+                }
+            })
             .map(|m| ChatMessage {
                 role: match m.role {
                     MemoryRole::User => MessageRole::User,
