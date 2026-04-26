@@ -1,52 +1,66 @@
 <template>
-  <div class="bg-gray-800 rounded-lg p-4">
-    <h2 class="text-xl font-bold mb-4 text-green-400">Effect Chain</h2>
+  <div>
+    <h2 class="text-sm font-semibold text-[#a0a0a0] uppercase tracking-wider mb-3">
+      Effect Chain
+    </h2>
     
-    <div v-if="plugins.length === 0" class="text-gray-400 text-center py-8">
-      No active plugins. Load one from the Plugin Manager.
+    <div v-if="plugins.length === 0" class="text-[#666] text-sm py-8 text-center border border-dashed border-[#333]">
+      No plugins loaded
     </div>
     
-    <div v-else class="space-y-2">
+    <div v-else class="space-y-px">
       <div 
         v-for="(plugin, index) in plugins" 
         :key="plugin.id"
-        :class="['flex items-center justify-between p-3 rounded', plugin.bypass ? 'bg-gray-600 opacity-60' : 'bg-gray-700']"
+        :class="[
+          'flex items-center justify-between p-3 border-l-2 transition-colors',
+          plugin.bypass 
+            ? 'border-[#444] bg-[#121212]/50 text-[#666]' 
+            : 'border-amber-500 bg-[#121212]'
+        ]"
       >
-        <div class="flex items-center space-x-3">
-          <div class="flex flex-col space-y-1">
+        <div class="flex items-center gap-3">
+          <div class="flex flex-col gap-0.5">
             <button 
               @click="movePlugin(plugin.id, -1)"
               :disabled="index === 0"
-              :class="['text-xs px-2 py-0.5 rounded', index === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-gray-400 hover:text-white']"
-            >↑</button>
+              class="text-[#666] hover:text-white disabled:text-[#333] disabled:cursor-not-allowed text-xs leading-none"
+            >▲</button>
             <button 
               @click="movePlugin(plugin.id, 1)"
               :disabled="index === plugins.length - 1"
-              :class="['text-xs px-2 py-0.5 rounded', index === plugins.length - 1 ? 'text-gray-500 cursor-not-allowed' : 'text-gray-400 hover:text-white']"
-            >↓</button>
+              class="text-[#666] hover:text-white disabled:text-[#333] disabled:cursor-not-allowed text-xs leading-none"
+            >▼</button>
           </div>
-          <span class="text-gray-500 font-mono">{{ index + 1 }}</span>
+          <span class="text-[#666] font-mono text-xs w-4">{{ index + 1 }}</span>
           <div>
-            <div :class="['font-semibold', plugin.bypass ? 'line-through text-gray-400' : '']">{{ plugin.name }}</div>
-            <div class="text-xs text-gray-400">{{ plugin.plugin_type }} | {{ plugin.id.slice(0, 8) }}</div>
+            <div :class="['font-medium text-sm', plugin.bypass ? 'line-through' : 'text-white']">
+              {{ plugin.name }}
+            </div>
+            <div class="text-xs text-[#666]">{{ plugin.plugin_type }}</div>
           </div>
         </div>
-        <div class="flex space-x-2">
+        <div class="flex gap-1">
           <button 
             @click="toggleBypass(plugin.id)"
-            :class="['px-3 py-1 rounded text-sm', plugin.bypass ? 'bg-orange-500 hover:bg-orange-600' : 'bg-gray-500 hover:bg-gray-600']"
+            :class="[
+              'px-2 py-1 text-xs border transition-colors',
+              plugin.bypass 
+                ? 'border-amber-500 text-amber-400 hover:bg-amber-500/10' 
+                : 'border-[#444] text-[#a0a0a0] hover:border-[#555]'
+            ]"
           >
             {{ plugin.bypass ? 'Enable' : 'Bypass' }}
           </button>
           <button 
             @click="selectPlugin(plugin)"
-            class="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 rounded text-sm"
+            class="px-2 py-1 text-xs border border-[#444] text-[#a0a0a0] hover:border-amber-500 hover:text-amber-400 transition-colors"
           >
-            Params
+            Edit
           </button>
           <button 
             @click="removePlugin(plugin.id)"
-            class="px-3 py-1 bg-red-500 hover:bg-red-600 rounded text-sm"
+            class="px-2 py-1 text-xs border border-[#444] text-red-400 hover:border-red-500 hover:bg-red-500/10 transition-colors"
           >
             Remove
           </button>

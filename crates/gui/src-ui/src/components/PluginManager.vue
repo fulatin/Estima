@@ -1,30 +1,32 @@
 <template>
-  <div class="bg-gray-800 rounded-lg p-4">
-    <h2 class="text-xl font-bold mb-4 text-blue-400">Plugin Manager</h2>
+  <div>
+    <h2 class="text-sm font-semibold text-[#a0a0a0] uppercase tracking-wider mb-3">
+      Plugin Manager
+    </h2>
     
-    <div class="mb-4">
+    <div class="mb-3">
       <input 
         v-model="filter"
         @input="searchPlugins"
         type="text" 
         placeholder="Search plugins..."
-        class="w-full px-3 py-2 bg-gray-700 rounded text-white placeholder-gray-400"
+        class="w-full px-3 py-2 bg-[#121212] border border-[#333] text-white placeholder-[#666] focus:border-amber-500 focus:outline-none text-sm"
       >
     </div>
     
-    <div class="max-h-96 overflow-y-auto space-y-2">
+    <div class="max-h-64 overflow-y-auto space-y-px">
       <div 
         v-for="plugin in availablePlugins" 
-        :key="plugin.id"
-        class="flex items-center justify-between p-3 bg-gray-700 rounded hover:bg-gray-600"
+        :key="plugin.uri"
+        class="flex items-center justify-between p-3 bg-[#121212] border-l-2 border-transparent hover:border-amber-500 transition-colors"
       >
         <div>
-          <div class="font-semibold">{{ plugin.name }}</div>
-          <div class="text-sm text-gray-400">{{ plugin.plugin_type }}</div>
+          <div class="font-medium text-sm text-white">{{ plugin.name }}</div>
+          <div class="text-xs text-[#666]">{{ plugin.plugin_type }}</div>
         </div>
         <button 
           @click="loadPlugin(plugin.uri)"
-          class="px-3 py-1 bg-blue-500 hover:bg-blue-600 rounded text-sm"
+          class="px-3 py-1 text-xs border border-amber-500 text-amber-400 hover:bg-amber-500/10 transition-colors"
         >
           Load
         </button>
@@ -39,7 +41,7 @@ import { useAudioStore } from '../stores/audioStore'
 
 const store = useAudioStore()
 const filter = ref('')
-const availablePlugins = ref([])
+const availablePlugins = ref<any[]>([])
 
 onMounted(async () => {
   availablePlugins.value = await store.listPlugins()

@@ -1,61 +1,54 @@
 <template>
-  <div class="bg-gray-800 rounded-lg p-4">
-    <h2 class="text-xl font-bold mb-4 text-pink-400">AI Assistant</h2>
+  <div class="p-4">
+    <h2 class="text-sm font-semibold text-[#a0a0a0] uppercase tracking-wider mb-3">
+      AI Assistant
+    </h2>
     
-    <div class="bg-gray-900 rounded-lg p-4 mb-4 h-48 overflow-y-auto space-y-2">
-      <div 
-        v-for="(msg, index) in messages" 
-        :key="index"
-        :class="[
-          'p-2 rounded',
-          msg.role === 'user' ? 'bg-blue-900 ml-8' : 'bg-gray-700 mr-8'
-        ]"
-      >
-        <div class="text-xs text-gray-400 mb-1">{{ msg.role === 'user' ? 'You' : 'AI' }}</div>
-        <div>{{ msg.content }}</div>
-        <div v-if="msg.commands" class="mt-2 text-xs text-green-400">
-          Commands: {{ msg.commands.length }}
+    <div class="bg-[#121212] border border-[#333] p-3 mb-3 h-40 overflow-y-auto">
+      <div v-if="messages.length === 0" class="text-[#666] text-sm h-full flex items-center justify-center">
+        Describe the sound you want...
+      </div>
+      <div v-else class="space-y-2">
+        <div 
+          v-for="(msg, index) in messages" 
+          :key="index"
+          :class="[
+            'text-sm p-2 border-l-2',
+            msg.role === 'user' 
+              ? 'border-amber-500 bg-amber-500/5 ml-4' 
+              : 'border-[#444] bg-[#1e1e1e] mr-4'
+          ]"
+        >
+          <div class="text-xs text-[#666] mb-1">{{ msg.role === 'user' ? 'You' : 'AI' }}</div>
+          <div class="text-[#ccc]">{{ msg.content }}</div>
         </div>
       </div>
-      <div v-if="thinking" class="text-gray-400 italic">Thinking...</div>
+      <div v-if="thinking" class="text-[#666] text-sm italic mt-2">Processing...</div>
     </div>
     
-    <div class="flex space-x-2">
+    <div class="flex gap-2">
       <input 
         v-model="inputMessage"
         @keypress.enter="sendMessage"
         type="text" 
-        placeholder="Describe what you want (e.g., 'Add some reverb')..."
-        class="flex-1 px-3 py-2 bg-gray-700 rounded text-white placeholder-gray-400"
+        placeholder="e.g., 'Add some reverb' or 'Give me a metal guitar tone'"
+        class="flex-1 px-3 py-2 bg-[#121212] border border-[#333] text-white placeholder-[#666] focus:border-amber-500 focus:outline-none"
       >
       <button 
         @click="sendMessage"
         :disabled="thinking || !inputMessage"
-        class="px-4 py-2 bg-pink-500 hover:bg-pink-600 disabled:bg-gray-600 rounded"
+        class="px-4 py-2 bg-amber-500 text-black font-medium hover:bg-amber-400 disabled:bg-[#333] disabled:text-[#666] disabled:cursor-not-allowed transition-colors"
       >
         Send
       </button>
       <button 
         @click="clearHistory"
         :disabled="thinking"
-        class="px-4 py-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 rounded"
-        title="Clear conversation history"
+        class="px-3 py-2 border border-[#444] text-[#a0a0a0] hover:border-[#555] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        title="Clear conversation"
       >
         Clear
       </button>
-    </div>
-    
-    <div v-if="lastCommands.length > 0" class="mt-4">
-      <h3 class="text-sm font-semibold mb-2">Last AI Commands:</h3>
-      <div class="space-y-1 text-sm">
-        <div 
-          v-for="(cmd, idx) in lastCommands" 
-          :key="idx"
-          class="p-2 bg-gray-700 rounded"
-        >
-          {{ idx + 1 }}. {{ JSON.stringify(cmd) }}
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -83,18 +76,18 @@ async function sendMessage() {
     lastCommands.value = response.commands || []
     messages.value.push({ 
       role: 'ai', 
-      content: `Executed ${lastCommands.value.length} command(s)`,
+      content: lastCommands.value.length > 0 
+        ? `Executed ${lastCommands.value.length} command(s)`
+        : 'Done',
       commands: lastCommands.value 
     })
     
-    // Execute the commands
     for (const cmd of lastCommands.value) {
       await executeCommand(cmd)
     }
     
     await store.refreshStatus()
     
-    // Refresh parameters if a plugin is selected
     if (store.selectedPlugin) {
       await store.selectPlugin(store.selectedPlugin)
     }
