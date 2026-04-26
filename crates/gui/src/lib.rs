@@ -628,8 +628,11 @@ async fn process_with_tools(
         return Err("Empty response from AI".to_string());
     }
 
-    log::warn!("Maximum tool iterations reached");
-    Err("Maximum tool iterations reached".to_string())
+    log::info!("Maximum tool iterations reached, returning summary response");
+    Ok(AIResponse {
+        content: r#"{"commands": []}"#.to_string(),
+        reasoning_content: None,
+    })
 }
 
 async fn process_without_tools(
