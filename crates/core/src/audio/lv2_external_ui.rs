@@ -135,6 +135,20 @@ impl LV2ExternalUIManager {
             
             let uri = plugin.info.uri.clone();
             let name = plugin.info.name.clone();
+            
+            // Check for known problematic plugins
+            let known_issues = [
+                "guitarix.sourceforge.net/plugins/gx_alembic",
+                "guitarix.sourceforge.net/plugins/gx_studiopre",
+                " guitarist.sourceforge.net/plugins/gx_sceleton",
+            ];
+            for issue in &known_issues {
+                if uri.contains(issue) {
+                    return Err(anyhow!("This plugin UI is not supported (known incompatibility with host embedding)"));
+                }
+            }
+            }
+            
             let handle = plugin.instance.raw().instance().handle();
             
             let ui_info = chain.get_plugin_ui_info_by_id(plugin_id)?;
