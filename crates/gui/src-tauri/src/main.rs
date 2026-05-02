@@ -1,8 +1,9 @@
 use estima_gui_lib::run;
 
 fn main() {
-    // Fix Gdk-Message Error 71 on Wayland
+    // GtkSocket requires X11 backend
     unsafe {
+        std::env::set_var("GDK_BACKEND", "x11");
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
     
