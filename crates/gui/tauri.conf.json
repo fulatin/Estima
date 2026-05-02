@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "identifier": "com.estima.app",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix crates/gui/src-ui",
-    "beforeBuildCommand": "npm run build --prefix crates/gui/src-ui",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:1420",
-    "frontendDist": "crates/gui/src-ui/dist"
+    "frontendDist": "./src-ui/dist"
   },
   "app": {
     "windows": [

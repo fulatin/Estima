@@ -120,7 +120,7 @@ describe('useAudioStore', () => {
   })
 
   it('selectPlugin sets selectedPlugin and loads parameters', async () => {
-    const plugin = { id: 'p1', uri: 'uri1', name: 'Reverb', plugin_type: 'reverb', bypass: false }
+    const plugin = { id: 'p1', uri: 'uri1', name: 'Reverb', plugin_type: 'reverb', bypass: false, hasUi: false }
     const mockParams = [{ name: 'mix', symbol: 'mix', default: 0.5, min: 0, max: 1, current: 0.5 }]
     vi.mocked(invoke).mockResolvedValueOnce(mockParams)
 

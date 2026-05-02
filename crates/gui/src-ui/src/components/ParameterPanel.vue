@@ -41,7 +41,7 @@ const store = useAudioStore()
 const selectedPlugin = computed(() => store.selectedPlugin)
 const parameters = computed(() => store.parameters)
 
-async function updateParameter(symbol: string, name: string, value: string) {
+async function updateParameter(symbol: string, _name: string, value: string) {
   const numValue = parseFloat(value)
   
   if (selectedPlugin.value) {
